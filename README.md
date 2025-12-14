@@ -15,6 +15,11 @@ A minimalist, single-page web application designed for an immersive listening ex
   - Drag-and-drop interface to move slides along the timeline.
   - Resize slide duration by dragging edges.
   - Snapping logic for precise alignment.
+- **Video Export**:
+  - Render your audio, visual slides, and lyrics into a downloadable video file.
+  - **Aspect Ratios**: Toggle between 16:9 (Landscape) and 9:16 (Portrait) for mobile stories.
+  - **Resolutions**: Choose between 720p and 1080p quality.
+  - Includes a professional metadata overlay in the rendered video.
 - **Immersive Interface**:
   - **Auto-Hide UI**: Controls fade away when the mouse is idle.
   - **Fullscreen Mode**: Distraction-free listening.
@@ -41,3 +46,7 @@ A minimalist, single-page web application designed for an immersive listening ex
    - Press **T** or click the Settings gear icon to open the Timeline.
    - Click "Add Images" to upload background visuals.
    - Use the timeline to arrange when images appear during the song.
+4. **Export Video**:
+   - Use the resolution toggle (e.g., "1080p") and aspect ratio toggle (e.g., "16:9") in the bottom control bar to set your preferences.
+   - Click the Video camera icon to begin rendering. 
+   - *Note*: The audio will play through in real-time to capture the video. Do not close the tab during this process.
