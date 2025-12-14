@@ -43,7 +43,7 @@ function App() {
   // State: Video Export
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
-  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '3:4'>('16:9');
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '3:4' | '1:1'>('16:9');
   const [resolution, setResolution] = useState<'720p' | '1080p'>('1080p');
 
   // Derived dimensions
@@ -55,6 +55,8 @@ function App() {
         return is1080p ? { w: 1080, h: 1920 } : { w: 720, h: 1280 };
       case '3:4':
         return is1080p ? { w: 1080, h: 1440 } : { w: 720, h: 960 };
+      case '1:1':
+        return is1080p ? { w: 1080, h: 1080 } : { w: 720, h: 720 };
       case '16:9':
       default:
         return is1080p ? { w: 1920, h: 1080 } : { w: 1280, h: 720 };
@@ -230,7 +232,8 @@ function App() {
   ) => {
     // Standard web font stack to match Tailwind
     const fontFamily = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
-    const isPortrait = width < height;
+    // Treat Square (1:1) as portrait for layout purposes (centered content)
+    const isPortrait = width <= height;
 
     // Scale Factor: All sizing logic is based on 1080p. 
     // If 720p, we scale everything down by ~0.66
@@ -339,7 +342,7 @@ function App() {
     const r = 12 * scale; // Radius
 
     if (isPortrait) {
-      // --- PORTRAIT LAYOUT (9:16 and 3:4): Top Center, slightly down ---
+      // --- PORTRAIT LAYOUT (9:16, 3:4, 1:1): Top Center, slightly down ---
       // Position Y at 3x margin to give breathing room from top edge
       const startY = margin * 3;
       const centerX = width / 2;
@@ -856,10 +859,11 @@ function App() {
                         onClick={() => setAspectRatio(prev => {
                            if (prev === '16:9') return '9:16';
                            if (prev === '9:16') return '3:4';
+                           if (prev === '3:4') return '1:1';
                            return '16:9';
                         })}
                         className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-zinc-700 rounded px-1 h-6 transition-colors disabled:opacity-30"
-                        title="Toggle Aspect Ratio (16:9 / 9:16 / 3:4)"
+                        title="Toggle Aspect Ratio (16:9 / 9:16 / 3:4 / 1:1)"
                         disabled={isRendering}
                      >
                         {aspectRatio}

@@ -28,9 +28,10 @@ Turn your audio and visuals into shareable videos directly in the browser.
   - **16:9**: Classic Landscape (YouTube, Desktop)
   - **9:16**: Vertical (TikTok, Instagram Reels, YouTube Shorts)
   - **3:4**: Vertical (Instagram Feed, Facebook)
+  - **1:1**: Square (Instagram Post, Facebook)
 - **Smart Overlays**: Automatically renders a professional metadata overlay (Cover Art + Text).
   - *Landscape*: Top-left alignment.
-  - *Portrait (9:16/3:4)*: Top-center alignment.
+  - *Portrait (9:16/3:4/1:1)*: Top-center alignment.
 
 ## Keyboard Shortcuts
 
