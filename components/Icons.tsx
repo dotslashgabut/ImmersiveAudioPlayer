@@ -21,7 +21,9 @@ import {
   Repeat,
   Square,
   Eye,
-  EyeOff
+  EyeOff,
+  Video,
+  Download
 } from 'lucide-react';
 
 export {
@@ -47,5 +49,7 @@ export {
   Repeat,
   Square,
   Eye,
-  EyeOff
+  EyeOff,
+  Video,
+  Download
 };

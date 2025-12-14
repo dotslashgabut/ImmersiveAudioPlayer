@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, 
   Maximize, Minimize, Upload, Music, FileText, Settings, ImageIcon,
-  Repeat, Square, Eye, EyeOff
+  Repeat, Square, Eye, EyeOff, Video, Download
 } from './components/Icons';
 import { AudioMetadata, LyricLine, TabView, VisualSlide } from './types';
 import { formatTime, parseLRC, parseSRT } from './utils/parsers';
@@ -13,6 +13,7 @@ function App() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const lyricsContainerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // State: Media & Data
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
@@ -38,6 +39,26 @@ function App() {
   const [isMouseIdle, setIsMouseIdle] = useState(false);
   const [bypassAutoHide, setBypassAutoHide] = useState(false);
   const [controlsTimeout, setControlsTimeout] = useState<number | null>(null);
+
+  // State: Video Export
+  const [isRendering, setIsRendering] = useState(false);
+  const [renderProgress, setRenderProgress] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [resolution, setResolution] = useState<'720p' | '1080p'>('1080p');
+
+  // Derived dimensions
+  const getCanvasDimensions = () => {
+    const isPortrait = aspectRatio === '9:16';
+    const is1080p = resolution === '1080p';
+    
+    if (isPortrait) {
+        return is1080p ? { w: 1080, h: 1920 } : { w: 720, h: 1280 };
+    } else {
+        return is1080p ? { w: 1920, h: 1080 } : { w: 1280, h: 720 };
+    }
+  };
+
+  const { w: canvasWidth, h: canvasHeight } = getCanvasDimensions();
 
   // Visibility Toggles (Shortcuts)
   const [showInfo, setShowInfo] = useState(true);
@@ -166,6 +187,9 @@ function App() {
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       setCurrentTime(audioRef.current.currentTime);
+      if (isRendering) {
+        setRenderProgress((audioRef.current.currentTime / duration) * 100);
+      }
     }
   };
 
@@ -190,6 +214,346 @@ function App() {
       audioRef.current.volume = newVol;
     }
     setIsMuted(newVol === 0);
+  };
+
+  // --- Video Export Logic ---
+  
+  const drawCanvasFrame = (
+    ctx: CanvasRenderingContext2D, 
+    width: number, 
+    height: number,
+    time: number,
+    images: Map<string, HTMLImageElement>
+  ) => {
+    // Standard web font stack to match Tailwind
+    const fontFamily = 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+    const isPortrait = width < height;
+
+    // Scale Factor: All sizing logic is based on 1080p. 
+    // If 720p, we scale everything down by ~0.66
+    // 1080p long edge = 1920, 720p long edge = 1280. 1280/1920 = 0.666
+    const scale = resolution === '1080p' ? 1 : (1280 / 1920);
+
+    // Clear
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, width, height);
+
+    // 1. Draw Background
+    const currentSlide = visualSlides.find(s => time >= s.startTime && time < s.endTime);
+    if (currentSlide) {
+      const img = images.get(currentSlide.id);
+      if (img) {
+        // Draw image "cover" style
+        const imgScale = Math.max(width / img.width, height / img.height);
+        const x = (width / 2) - (img.width / 2) * imgScale;
+        const y = (height / 2) - (img.height / 2) * imgScale;
+        ctx.drawImage(img, x, y, img.width * imgScale, img.height * imgScale);
+      }
+    } else if (metadata.coverUrl) {
+       const img = images.get('cover');
+       if (img) {
+          const imgScale = Math.max(width / img.width, height / img.height);
+          const x = (width / 2) - (img.width / 2) * imgScale;
+          const y = (height / 2) - (img.height / 2) * imgScale;
+          ctx.drawImage(img, x, y, img.width * imgScale, img.height * imgScale);
+       }
+    }
+
+    // Overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)'; // Darken bg
+    if (currentSlide) ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Draw Lyrics
+    const activeIdx = lyrics.findIndex((line, index) => {
+      const nextLine = lyrics[index + 1];
+      return time >= line.time && (!nextLine || time < nextLine.time);
+    });
+
+    // Layout config (Scaled)
+    const baseFontSize = (isPortrait ? 50 : 60) * scale;
+    const secondaryFontSize = (isPortrait ? 25 : 30) * scale;
+    const lineSpacing = (isPortrait ? 80 : 100) * scale;
+
+    if (activeIdx !== -1) {
+       ctx.textAlign = 'center';
+       ctx.textBaseline = 'middle';
+       const centerY = height / 2;
+       
+       // Draw surrounding lines
+       for (let i = -2; i <= 2; i++) {
+         const idx = activeIdx + i;
+         if (idx >= 0 && idx < lyrics.length) {
+            const line = lyrics[idx];
+            const isCurrent = i === 0;
+            
+            // Style
+            ctx.font = isCurrent ? `bold ${baseFontSize}px ${fontFamily}` : `${secondaryFontSize}px ${fontFamily}`;
+            ctx.fillStyle = isCurrent ? '#ffffff' : 'rgba(255, 255, 255, 0.5)';
+            
+            // Shadow for active
+            if (isCurrent) {
+               ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+               ctx.shadowBlur = 10 * scale;
+               ctx.shadowOffsetX = 0;
+               ctx.shadowOffsetY = 2 * scale;
+            } else {
+               ctx.shadowColor = 'transparent';
+            }
+
+            const yPos = centerY + (i * lineSpacing); 
+            
+            // Text measurement for basic wrapping prevention (clipping)
+            const maxWidth = width * 0.9;
+            ctx.fillText(line.text, width / 2, yPos, maxWidth);
+         }
+       }
+       // Reset Shadow
+       ctx.shadowColor = 'transparent';
+    } else {
+       // Draw Song Title if no lyrics (Center Screen Placeholder)
+       if (lyrics.length === 0) {
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = `bold ${baseFontSize}px ${fontFamily}`;
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'rgba(0,0,0,0.8)';
+          ctx.shadowBlur = 10 * scale;
+          ctx.fillText(metadata.title, width / 2, height / 2 - (40 * scale));
+          
+          ctx.font = `${secondaryFontSize}px ${fontFamily}`;
+          ctx.fillStyle = '#cccccc';
+          ctx.fillText(metadata.artist, width / 2, height / 2 + (40 * scale));
+          ctx.shadowColor = 'transparent';
+       }
+    }
+
+    // 3. Draw Metadata Overlay
+    const margin = 40 * scale;
+    const thumbSize = (isPortrait ? 150 : 100) * scale; // Slightly larger thumb in portrait
+    const textOffset = 25 * scale;
+    const coverImg = metadata.coverUrl ? images.get('cover') : null;
+    const r = 12 * scale; // Radius
+
+    if (isPortrait) {
+      // --- PORTRAIT LAYOUT: Top Center, slightly down ---
+      // Position Y at 3x margin to give breathing room from top edge
+      const startY = margin * 3;
+      const centerX = width / 2;
+      
+      // 1. Draw Image (Centered)
+      const imgX = centerX - (thumbSize / 2);
+      const imgY = startY;
+
+      ctx.save();
+      // Rounded Clip
+      ctx.beginPath();
+      ctx.roundRect(imgX, imgY, thumbSize, thumbSize, r);
+      ctx.clip();
+
+      if (coverImg) {
+        ctx.drawImage(coverImg, imgX, imgY, thumbSize, thumbSize);
+      } else {
+        ctx.fillStyle = '#27272a';
+        ctx.fillRect(imgX, imgY, thumbSize, thumbSize);
+      }
+      ctx.restore();
+
+      // Border
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(imgX, imgY, thumbSize, thumbSize, r);
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 2 * scale;
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. Draw Text (Centered Below Image)
+      ctx.textAlign = 'center';
+      
+      // Title
+      ctx.textBaseline = 'top';
+      ctx.font = `bold ${36 * scale}px ${fontFamily}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 4 * scale;
+      ctx.shadowOffsetY = 1 * scale;
+      const titleY = imgY + thumbSize + textOffset;
+      ctx.fillText(metadata.title, centerX, titleY);
+
+      // Artist
+      ctx.font = `${24 * scale}px ${fontFamily}`;
+      ctx.fillStyle = '#d4d4d8';
+      ctx.shadowBlur = 2 * scale;
+      const artistY = titleY + (40 * scale); // spacing based on prev font size
+      ctx.fillText(metadata.artist, centerX, artistY);
+      
+      ctx.shadowColor = 'transparent';
+
+    } else {
+      // --- LANDSCAPE LAYOUT: Top Left ---
+      const x = margin;
+      const y = margin;
+      
+      ctx.save();
+      // Rounded Clip
+      ctx.beginPath();
+      ctx.roundRect(x, y, thumbSize, thumbSize, r);
+      ctx.clip();
+
+      if (coverImg) {
+        ctx.drawImage(coverImg, x, y, thumbSize, thumbSize);
+      } else {
+        ctx.fillStyle = '#27272a';
+        ctx.fillRect(x, y, thumbSize, thumbSize);
+      }
+      ctx.restore();
+
+      // Border
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(x, y, thumbSize, thumbSize, r);
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.lineWidth = 2 * scale;
+      ctx.stroke();
+      ctx.restore();
+
+      // Text Info (Right of Cover)
+      const textX = margin + thumbSize + textOffset;
+      const textCenterY = margin + (thumbSize / 2);
+
+      ctx.textAlign = 'left';
+      
+      // Title
+      ctx.textBaseline = 'bottom';
+      ctx.font = `bold ${32 * scale}px ${fontFamily}`;
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)';
+      ctx.shadowBlur = 4 * scale;
+      ctx.shadowOffsetY = 1 * scale;
+      ctx.fillText(metadata.title, textX, textCenterY - (4 * scale));
+
+      // Artist
+      ctx.textBaseline = 'top';
+      ctx.font = `${20 * scale}px ${fontFamily}`;
+      ctx.fillStyle = '#d4d4d8';
+      ctx.shadowBlur = 2 * scale;
+      ctx.fillText(metadata.artist, textX, textCenterY + (4 * scale));
+      
+      ctx.shadowColor = 'transparent';
+    }
+  };
+
+  const handleExportVideo = async () => {
+    if (!audioSrc || !audioRef.current || !canvasRef.current) return;
+    
+    // Confirm
+    if (!window.confirm(`Start rendering ${aspectRatio} (${resolution}) video? This will play the song from start to finish. Please do not switch tabs.`)) return;
+
+    setIsRendering(true);
+    setRenderProgress(0);
+    
+    // Stop and Reset
+    stopPlayback();
+    
+    // 1. Preload Images
+    const imageMap = new Map<string, HTMLImageElement>();
+    const loadPromises: Promise<void>[] = [];
+    
+    // Helper
+    const loadImg = (id: string, url: string) => {
+       return new Promise<void>((resolve) => {
+          const img = new Image();
+          img.crossOrigin = "anonymous";
+          img.onload = () => {
+             imageMap.set(id, img);
+             resolve();
+          };
+          img.onerror = () => resolve(); // Ignore errors
+          img.src = url;
+       });
+    };
+
+    visualSlides.forEach(s => loadPromises.push(loadImg(s.id, s.url)));
+    if (metadata.coverUrl) loadPromises.push(loadImg('cover', metadata.coverUrl));
+    
+    await Promise.all(loadPromises);
+
+    // 2. Setup Recording
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const stream = canvas.captureStream(30); // 30 FPS
+    
+    // Add Audio Track
+    const audioEl = audioRef.current;
+    // Note: captureStream might require vendor prefix or specific browser support
+    // Fallback: simple error if not supported
+    let audioStream: MediaStream | null = null;
+    
+    try {
+        // @ts-ignore
+        if (audioEl.captureStream) audioStream = audioEl.captureStream();
+        // @ts-ignore
+        else if (audioEl.mozCaptureStream) audioStream = audioEl.mozCaptureStream();
+        else throw new Error("Audio capture not supported");
+    } catch (e) {
+        alert("Your browser does not support audio capture for recording.");
+        setIsRendering(false);
+        return;
+    }
+
+    if (audioStream) {
+       stream.addTrack(audioStream.getAudioTracks()[0]);
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : 'video/webm';
+    // Adjust bitrate based on resolution (8Mbps for 1080p, 4Mbps for 720p)
+    const bitrate = resolution === '1080p' ? 8000000 : 4000000;
+    const mediaRecorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: bitrate }); 
+    
+    const chunks: Blob[] = [];
+    mediaRecorder.ondataavailable = (e) => {
+       if (e.data.size > 0) chunks.push(e.data);
+    };
+    
+    mediaRecorder.onstop = () => {
+       const blob = new Blob(chunks, { type: mimeType });
+       const url = URL.createObjectURL(blob);
+       const a = document.createElement('a');
+       a.href = url;
+       a.download = `${metadata.title || 'video'}_${aspectRatio.replace(':','-')}_${resolution}.${mimeType === 'video/mp4' ? 'mp4' : 'webm'}`;
+       document.body.appendChild(a);
+       a.click();
+       document.body.removeChild(a);
+       URL.revokeObjectURL(url);
+       setIsRendering(false);
+    };
+
+    // 3. Start Loop
+    mediaRecorder.start();
+    audioEl.play();
+    setIsPlaying(true); // Sync UI state
+
+    const renderLoop = () => {
+       if (audioEl.paused || audioEl.ended) {
+          // If ended naturally
+          if (audioEl.ended && mediaRecorder.state === 'recording') {
+             mediaRecorder.stop();
+             setIsPlaying(false);
+          }
+          return;
+       }
+       
+       if (ctx) {
+          drawCanvasFrame(ctx, canvas.width, canvas.height, audioEl.currentTime, imageMap);
+       }
+       
+       if (mediaRecorder.state === 'recording') {
+          requestAnimationFrame(renderLoop);
+       }
+    };
+    
+    renderLoop();
   };
 
   // Scroll active lyric into view
@@ -224,10 +588,12 @@ function App() {
         case ' ':
         case 'k':
           e.preventDefault();
+          if (isRendering) return; // Disable play toggle during render
           togglePlay();
           break;
         case 's':
           e.preventDefault();
+          if (isRendering) return;
           stopPlayback();
           break;
         case 'l':
@@ -255,14 +621,14 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, isLooping, activeTab]); 
+  }, [isPlaying, isLooping, activeTab, isRendering]); 
 
   // --- Render Helpers ---
 
   // Combine manual visibility with mouse idle state
   // BypassAutoHide overrides mouse idle.
-  const isHeaderVisible = showInfo && (!isMouseIdle || bypassAutoHide);
-  const isFooterVisible = showPlayer && (!isMouseIdle || bypassAutoHide);
+  const isHeaderVisible = showInfo && (!isMouseIdle || bypassAutoHide) && !isRendering;
+  const isFooterVisible = showPlayer && (!isMouseIdle || bypassAutoHide) && !isRendering;
 
   const backgroundStyle = activeSlide 
     ? { backgroundImage: `url(${activeSlide.url})` }
@@ -285,6 +651,15 @@ function App() {
         onEnded={() => {
             if (!isLooping) setIsPlaying(false);
         }}
+        crossOrigin="anonymous"
+      />
+
+      {/* Hidden Rendering Canvas */}
+      <canvas 
+         ref={canvasRef}
+         width={canvasWidth}
+         height={canvasHeight}
+         className="absolute top-0 left-0 hidden pointer-events-none opacity-0"
       />
 
       {/* --- Visual Layer --- */}
@@ -370,7 +745,7 @@ function App() {
                         : 'text-xl md:text-2xl text-zinc-500/60 hover:text-zinc-300 drop-shadow-sm'
                     }`}
                     onClick={() => {
-                       if (audioRef.current) {
+                       if (audioRef.current && !isRendering) {
                          audioRef.current.currentTime = line.time;
                          setCurrentTime(line.time);
                        }
@@ -411,7 +786,8 @@ function App() {
                         max={duration || 0} 
                         value={currentTime}
                         onChange={handleSeek}
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                        disabled={isRendering}
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-wait"
                       />
                   </div>
                   <span className="text-xs text-zinc-400 font-mono w-10">{formatTime(duration)}</span>
@@ -422,44 +798,75 @@ function App() {
                   <div className="flex gap-2">
                      <label className="p-2 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors" title="Load Audio">
                         <Music size={18} />
-                        <input type="file" accept="audio/*" className="hidden" onChange={handleAudioUpload} />
+                        <input type="file" accept="audio/*" className="hidden" onChange={handleAudioUpload} disabled={isRendering} />
                      </label>
                      <label className="p-2 rounded-lg hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer transition-colors" title="Load Lyrics (.lrc, .srt)">
                         <FileText size={18} />
-                        <input type="file" accept=".lrc,.srt" className="hidden" onChange={handleLyricsUpload} />
+                        <input type="file" accept=".lrc,.srt" className="hidden" onChange={handleLyricsUpload} disabled={isRendering} />
                      </label>
                   </div>
 
                   <div className="flex items-center gap-6">
                      <button 
-                       className="text-zinc-400 hover:text-white transition-colors" 
+                       className="text-zinc-400 hover:text-white transition-colors disabled:opacity-50" 
                        onClick={stopPlayback}
                        title="Stop (S)"
+                       disabled={isRendering}
                      >
                         <Square size={20} fill="currentColor" />
                      </button>
-                     <button className="text-zinc-400 hover:text-white transition-colors" onClick={() => audioRef.current && (audioRef.current.currentTime -= 5)}>
+                     <button className="text-zinc-400 hover:text-white transition-colors disabled:opacity-50" disabled={isRendering} onClick={() => audioRef.current && (audioRef.current.currentTime -= 5)}>
                         <SkipBack size={24} />
                      </button>
                      <button 
                         onClick={togglePlay}
-                        className="w-14 h-14 flex items-center justify-center bg-white text-black rounded-full hover:scale-105 transition-transform shadow-lg shadow-purple-500/20"
+                        disabled={isRendering}
+                        className="w-14 h-14 flex items-center justify-center bg-white text-black rounded-full hover:scale-105 transition-transform shadow-lg shadow-purple-500/20 disabled:opacity-50 disabled:hover:scale-100"
                      >
                         {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" className="ml-1" />}
                      </button>
-                     <button className="text-zinc-400 hover:text-white transition-colors" onClick={() => audioRef.current && (audioRef.current.currentTime += 5)}>
+                     <button className="text-zinc-400 hover:text-white transition-colors disabled:opacity-50" disabled={isRendering} onClick={() => audioRef.current && (audioRef.current.currentTime += 5)}>
                         <SkipForward size={24} />
                      </button>
                      <button 
-                       className={`transition-colors ${isLooping ? 'text-green-400 hover:text-green-300' : 'text-zinc-400 hover:text-white'}`} 
+                       className={`transition-colors disabled:opacity-50 ${isLooping ? 'text-green-400 hover:text-green-300' : 'text-zinc-400 hover:text-white'}`} 
                        onClick={toggleLoop}
                        title="Loop (L)"
+                       disabled={isRendering}
                      >
                         <Repeat size={20} />
                      </button>
                   </div>
 
-                  <div className="flex items-center gap-2 w-32 justify-end group">
+                  <div className="flex items-center gap-2 w-auto justify-end group">
+                     {/* Resolution Toggle */}
+                     <button 
+                        onClick={() => setResolution(prev => prev === '1080p' ? '720p' : '1080p')}
+                        className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-zinc-700 rounded px-1 h-6 transition-colors disabled:opacity-30"
+                        title="Toggle Resolution (720p / 1080p)"
+                        disabled={isRendering}
+                     >
+                        {resolution}
+                     </button>
+                     {/* Aspect Ratio Toggle */}
+                     <button 
+                        onClick={() => setAspectRatio(prev => prev === '16:9' ? '9:16' : '16:9')}
+                        className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-zinc-700 rounded px-1 h-6 transition-colors disabled:opacity-30"
+                        title="Toggle Aspect Ratio (16:9 / 9:16)"
+                        disabled={isRendering}
+                     >
+                        {aspectRatio}
+                     </button>
+                     {/* Export Button */}
+                     <button 
+                        onClick={handleExportVideo}
+                        disabled={isRendering || !audioSrc}
+                        className="text-zinc-400 hover:text-purple-400 transition-colors disabled:opacity-30 mr-2"
+                        title="Export as Video"
+                     >
+                        <Video size={20} />
+                     </button>
+
                      <button onClick={() => setIsMuted(!isMuted)} className="text-zinc-400 hover:text-white">
                         {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
                      </button>
@@ -494,6 +901,25 @@ function App() {
               duration={duration || 60}
               lyrics={lyrics}
             />
+         </div>
+      )}
+
+      {/* Rendering Overlay */}
+      {isRendering && (
+         <div className="absolute inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-8 text-center space-y-6">
+            <div className="animate-bounce">
+              <Video size={48} className="text-purple-500" />
+            </div>
+            <h2 className="text-2xl font-bold text-white">Rendering Video ({aspectRatio} {resolution})</h2>
+            <p className="text-zinc-400 max-w-md">The song is playing to capture the video. Please do not close the tab or switch windows.</p>
+            
+            <div className="w-full max-w-md h-2 bg-zinc-800 rounded-full overflow-hidden">
+               <div 
+                 className="h-full bg-purple-500 transition-all duration-300 ease-linear"
+                 style={{ width: `${renderProgress}%` }}
+               ></div>
+            </div>
+            <p className="text-sm font-mono text-zinc-500">{Math.round(renderProgress)}%</p>
          </div>
       )}
       
