@@ -43,17 +43,20 @@ function App() {
   // State: Video Export
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
-  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16' | '3:4'>('16:9');
   const [resolution, setResolution] = useState<'720p' | '1080p'>('1080p');
 
   // Derived dimensions
   const getCanvasDimensions = () => {
-    const isPortrait = aspectRatio === '9:16';
     const is1080p = resolution === '1080p';
     
-    if (isPortrait) {
+    switch (aspectRatio) {
+      case '9:16':
         return is1080p ? { w: 1080, h: 1920 } : { w: 720, h: 1280 };
-    } else {
+      case '3:4':
+        return is1080p ? { w: 1080, h: 1440 } : { w: 720, h: 960 };
+      case '16:9':
+      default:
         return is1080p ? { w: 1920, h: 1080 } : { w: 1280, h: 720 };
     }
   };
@@ -336,7 +339,7 @@ function App() {
     const r = 12 * scale; // Radius
 
     if (isPortrait) {
-      // --- PORTRAIT LAYOUT: Top Center, slightly down ---
+      // --- PORTRAIT LAYOUT (9:16 and 3:4): Top Center, slightly down ---
       // Position Y at 3x margin to give breathing room from top edge
       const startY = margin * 3;
       const centerX = width / 2;
@@ -391,7 +394,7 @@ function App() {
       ctx.shadowColor = 'transparent';
 
     } else {
-      // --- LANDSCAPE LAYOUT: Top Left ---
+      // --- LANDSCAPE LAYOUT (16:9): Top Left ---
       const x = margin;
       const y = margin;
       
@@ -850,9 +853,13 @@ function App() {
                      </button>
                      {/* Aspect Ratio Toggle */}
                      <button 
-                        onClick={() => setAspectRatio(prev => prev === '16:9' ? '9:16' : '16:9')}
+                        onClick={() => setAspectRatio(prev => {
+                           if (prev === '16:9') return '9:16';
+                           if (prev === '9:16') return '3:4';
+                           return '16:9';
+                        })}
                         className="text-[10px] font-mono text-zinc-500 hover:text-zinc-300 border border-zinc-700 rounded px-1 h-6 transition-colors disabled:opacity-30"
-                        title="Toggle Aspect Ratio (16:9 / 9:16)"
+                        title="Toggle Aspect Ratio (16:9 / 9:16 / 3:4)"
                         disabled={isRendering}
                      >
                         {aspectRatio}
