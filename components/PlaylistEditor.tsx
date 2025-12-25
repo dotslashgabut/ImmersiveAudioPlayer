@@ -1,7 +1,9 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { PlaylistItem, LyricLine } from '../types';
-import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X } from './Icons';
+import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown } from './Icons';
 import { formatTime, parseLRC, parseSRT } from '../utils/parsers';
+// Use correct import for GoogleGenAI and Type
+import { GoogleGenAI, Type } from "@google/genai";
 
 interface PlaylistEditorProps {
     playlist: PlaylistItem[];
@@ -11,7 +13,6 @@ interface PlaylistEditorProps {
     onPlayTrack: (index: number) => void;
     onSeek: (time: number) => void;
     onClearPlaylist: () => void;
-
     currentTime: number;
     onClose: () => void;
 }
@@ -20,34 +21,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const containerRef = useRef<HTMLDivElement>(null);
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
-
-    // Auto-scroll active lyric
-    const currentItem = currentTrackIndex >= 0 ? playlist[currentTrackIndex] : null;
-    const currentLyrics = currentItem?.parsedLyrics || [];
-
-    const activeLyricIndex = useMemo(() => {
-        if (!currentItem) return -1;
-        return currentLyrics.findIndex((l, i) => {
-            if (l.endTime !== undefined) {
-                return currentTime >= l.time && currentTime < l.endTime;
-            }
-            const next = currentLyrics[i + 1];
-            return currentTime >= l.time && (!next || currentTime < next.time);
-        });
-    }, [currentTime, currentItem, currentLyrics]);
-
-    useEffect(() => {
-        if (activeLyricIndex !== -1) {
-            const activeEl = document.getElementById(`lyric-active-${currentTrackIndex}`);
-            if (activeEl) {
-                activeEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
-            }
-        }
-    }, [activeLyricIndex, currentTrackIndex]);
+    const [transcribingIds, setTranscribingIds] = useState<Set<string>>(new Set());
 
     const handleSort = (type: 'filename' | 'artist' | 'title' | 'album' | 'random') => {
         if (playlist.length === 0) return;
-
         const currentItem = currentTrackIndex >= 0 ? playlist[currentTrackIndex] : null;
         const sorted = [...playlist];
         let direction: 'asc' | 'desc' = 'asc';
@@ -64,18 +41,11 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             }
             setSortConfig({ key: type, direction });
             const multiplier = direction === 'asc' ? 1 : -1;
-
-            if (type === 'filename') {
-                sorted.sort((a, b) => multiplier * a.audioFile.name.localeCompare(b.audioFile.name));
-            } else if (type === 'artist') {
-                sorted.sort((a, b) => multiplier * (a.metadata.artist || '').localeCompare(b.metadata.artist || ''));
-            } else if (type === 'title') {
-                sorted.sort((a, b) => multiplier * (a.metadata.title || '').localeCompare(b.metadata.title || ''));
-            } else if (type === 'album') {
-                sorted.sort((a, b) => multiplier * (a.metadata.album || '').localeCompare(b.metadata.album || ''));
-            }
+            if (type === 'filename') sorted.sort((a, b) => multiplier * a.audioFile.name.localeCompare(b.audioFile.name));
+            else if (type === 'artist') sorted.sort((a, b) => multiplier * (a.metadata.artist || '').localeCompare(b.metadata.artist || ''));
+            else if (type === 'title') sorted.sort((a, b) => multiplier * (a.metadata.title || '').localeCompare(b.metadata.title || ''));
+            else if (type === 'album') sorted.sort((a, b) => multiplier * (a.metadata.album || '').localeCompare(b.metadata.album || ''));
         }
-
         setPlaylist(sorted);
         if (currentItem) {
             const newIndex = sorted.findIndex(i => i.id === currentItem.id);
@@ -83,33 +53,167 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         }
     };
 
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+                const base64String = (reader.result as string).split(',')[1];
+                resolve(base64String);
+            };
+            reader.onerror = error => reject(error);
+        });
+    };
+
+    const handleTranscribe = async (item: PlaylistItem) => {
+        if (transcribingIds.has(item.id)) return;
+        setTranscribingIds(prev => new Set(prev).add(item.id));
+
+        try {
+            const base64Data = await fileToBase64(item.audioFile);
+            // Initialize ai with apiKey from process.env.API_KEY
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            // Use ai.models.generateContent with proper configuration for JSON output and Type from @google/genai
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: {
+                    parts: [
+                        {
+                            inlineData: {
+                                mimeType: item.audioFile.type,
+                                data: base64Data,
+                            },
+                        },
+                        {
+                            text: "Transcribe this audio precisely into synchronized lyrics. Return a JSON array of objects representing synchronized lyrics. Each object MUST have a 'time' property (start time in seconds as a number) and a 'text' property (the spoken words)."
+                        }
+                    ]
+                },
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                time: {
+                                    type: Type.NUMBER,
+                                    description: 'The start time in seconds.',
+                                },
+                                text: {
+                                    type: Type.STRING,
+                                    description: 'The lyric text.',
+                                },
+                            },
+                            required: ["time", "text"],
+                        },
+                    },
+                },
+            });
+
+            // Access response text directly as property per guidelines
+            const rawText = response.text || "[]";
+            const transcribedLyrics: LyricLine[] = JSON.parse(rawText);
+
+            setPlaylist(prev => prev.map(p => 
+                p.id === item.id ? { ...p, parsedLyrics: transcribedLyrics.sort((a, b) => a.time - b.time) } : p
+            ));
+        } catch (err) {
+            console.error("Transcription failed:", err);
+            alert("Transcription failed. Please check your API key or file format.");
+        } finally {
+            setTranscribingIds(prev => {
+                const next = new Set(prev);
+                next.delete(item.id);
+                return next;
+            });
+        }
+    };
+
+    const downloadFile = (content: string, filename: string, mimeType: string) => {
+        const blob = new Blob([content], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
+    const exportLyrics = (item: PlaylistItem, format: 'txt' | 'json' | 'srt' | 'lrc') => {
+        const rawLyrics = item.parsedLyrics || [];
+        if (rawLyrics.length === 0) return;
+
+        let content = "";
+        const filename = `${item.metadata.title || 'lyrics'}.${format}`;
+
+        if (format === 'txt') {
+            content = rawLyrics.map(l => l.text).join("\n");
+        } else if (format === 'json') {
+            content = JSON.stringify(rawLyrics, null, 2);
+        } else if (format === 'srt') {
+            content = rawLyrics.map((l, i) => {
+                const nextTime = rawLyrics[i + 1]?.time || l.time + 3;
+                const toTimestamp = (sec: number) => {
+                    const hrs = Math.floor(sec / 3600).toString().padStart(2, '0');
+                    const mins = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
+                    const secs = Math.floor(sec % 60).toString().padStart(2, '0');
+                    const ms = Math.floor((sec % 1) * 1000).toString().padStart(3, '0');
+                    return `${hrs}:${mins}:${secs},${ms}`;
+                };
+                return `${i + 1}\n${toTimestamp(l.time)} --> ${toTimestamp(nextTime)}\n${l.text}\n`;
+            }).join("\n");
+        } else if (format === 'lrc') {
+            const lrcLines: string[] = [];
+            
+            const formatLrcTime = (sec: number) => {
+                const mins = Math.floor(sec / 60).toString().padStart(2, '0');
+                const secs = (sec % 60).toFixed(2).padStart(5, '0');
+                return `[${mins}:${secs}]`;
+            };
+
+            for (let i = 0; i < rawLyrics.length; i++) {
+                const current = rawLyrics[i];
+                const next = rawLyrics[i + 1];
+                
+                lrcLines.push(`${formatLrcTime(current.time)}${current.text}`);
+                
+                if (next && (next.time - current.time) > 4) {
+                    lrcLines.push(`${formatLrcTime(current.time + 3)}`);
+                }
+            }
+            
+            const lastLine = rawLyrics[rawLyrics.length - 1];
+            if (lastLine) {
+                lrcLines.push(`${formatLrcTime(lastLine.time + 3)}`);
+            }
+            
+            content = lrcLines.join("\n");
+        }
+
+        downloadFile(content, filename, 'application/octet-stream');
+    };
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (selectedIndex !== null && e.key === 'Delete') {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             setPlaylist(prev => {
                 const newList = [...prev];
                 newList.splice(selectedIndex, 1);
                 return newList;
             });
-            if (selectedIndex >= playlist.length - 1) {
-                setSelectedIndex(playlist.length > 1 ? playlist.length - 2 : null);
-            }
         } else if (e.key === 'ArrowDown' && playlist.length > 0) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             setSelectedIndex(prev => prev === null ? 0 : Math.min(prev + 1, playlist.length - 1));
         } else if (e.key === 'ArrowUp' && playlist.length > 0) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             setSelectedIndex(prev => prev === null ? 0 : Math.max(prev - 1, 0));
         } else if (e.key === 'Enter' && selectedIndex !== null) {
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             onPlayTrack(selectedIndex);
-        } else if (e.key === 'Escape') {
-            setSelectedIndex(null);
         }
     }, [selectedIndex, playlist.length, setPlaylist, onPlayTrack]);
 
@@ -120,12 +224,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             return () => container.removeEventListener('keydown', handleKeyDown);
         }
     }, [handleKeyDown]);
-
-    useEffect(() => {
-        if (selectedIndex !== null && selectedIndex >= playlist.length) {
-            setSelectedIndex(playlist.length > 0 ? playlist.length - 1 : null);
-        }
-    }, [playlist.length, selectedIndex]);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -142,14 +240,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             });
 
             const newItems: PlaylistItem[] = [];
-
             const extractMetadata = async (file: File, fallbackTitle: string): Promise<{ title: string; artist: string; album?: string; coverUrl: string | null }> => {
                 return new Promise((resolve) => {
                     const jsmediatags = (window as any).jsmediatags;
-                    if (!jsmediatags) {
-                       resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null });
-                       return;
-                    }
+                    if (!jsmediatags) { resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null }); return; }
                     jsmediatags.read(file, {
                         onSuccess: (tag: any) => {
                             const { title, artist, album, picture } = tag.tags;
@@ -157,35 +251,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             if (picture) {
                                 const { data, format } = picture;
                                 let base64String = "";
-                                for (let i = 0; i < data.length; i++) {
-                                    base64String += String.fromCharCode(data[i]);
-                                }
+                                for (let i = 0; i < data.length; i++) base64String += String.fromCharCode(data[i]);
                                 coverUrl = `data:${format};base64,${window.btoa(base64String)}`;
                             }
-                            resolve({
-                                title: title || fallbackTitle,
-                                artist: artist || 'Unknown Artist',
-                                album: album || undefined,
-                                coverUrl
-                            });
+                            resolve({ title: title || fallbackTitle, artist: artist || 'Unknown Artist', album: album || undefined, coverUrl });
                         },
-                        onError: () => {
-                            resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null });
-                        }
+                        onError: () => resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null })
                     });
                 });
-            };
-
-            const parseLyrics = async (file: File): Promise<LyricLine[]> => {
-                try {
-                    const text = await file.text();
-                    const ext = file.name.split('.').pop()?.toLowerCase();
-                    if (ext === 'lrc') return parseLRC(text);
-                    if (ext === 'srt') return parseSRT(text);
-                } catch (e) {
-                    console.error("Failed to parse lyrics", e);
-                }
-                return [];
             };
 
             for (const [basename, group] of fileGroups.entries()) {
@@ -194,23 +267,15 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     const id = Math.random().toString(36).substr(2, 9);
                     let itemParsedLyrics: LyricLine[] = [];
                     if (group.lyric) {
-                        itemParsedLyrics = await parseLyrics(group.lyric);
+                        const text = await group.lyric.text();
+                        const ext = group.lyric.name.split('.').pop()?.toLowerCase();
+                        if (ext === 'lrc') itemParsedLyrics = parseLRC(text);
+                        else if (ext === 'srt') itemParsedLyrics = parseSRT(text);
                     }
-
-                    newItems.push({
-                        id,
-                        audioFile: group.audio,
-                        lyricFile: group.lyric,
-                        parsedLyrics: itemParsedLyrics,
-                        metadata,
-                        duration: 0
-                    });
+                    newItems.push({ id, audioFile: group.audio, lyricFile: group.lyric, parsedLyrics: itemParsedLyrics, metadata, duration: 0 });
                 }
             }
-
-            if (newItems.length > 0) {
-                setPlaylist(prev => [...prev, ...newItems]);
-            }
+            if (newItems.length > 0) setPlaylist(prev => [...prev, ...newItems]);
             e.target.value = '';
         }
     };
@@ -233,69 +298,21 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     </h2>
                     <div className="w-px h-4 bg-zinc-700"></div>
                     <div className="flex items-center gap-1">
-                        <button
-                            onClick={() => handleSort('filename')}
-                            className={`p-1 rounded transition-colors ${sortConfig.key === 'filename' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}
-                            title="Sort by Filename"
-                        >
-                            <FileText size={14} className={sortConfig.key === 'filename' && sortConfig.direction === 'desc' ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                        </button>
-                        <button
-                            onClick={() => handleSort('artist')}
-                            className={`p-1 rounded transition-colors ${sortConfig.key === 'artist' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}
-                            title="Sort by Artist"
-                        >
-                            <User size={14} className={sortConfig.key === 'artist' && sortConfig.direction === 'desc' ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                        </button>
-                        <button
-                            onClick={() => handleSort('title')}
-                            className={`p-1 rounded transition-colors ${sortConfig.key === 'title' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}
-                            title="Sort by Title"
-                        >
-                            <Music size={14} className={sortConfig.key === 'title' && sortConfig.direction === 'desc' ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                        </button>
-                        <button
-                            onClick={() => handleSort('album')}
-                            className={`p-1 rounded transition-colors ${sortConfig.key === 'album' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}
-                            title="Sort by Album"
-                        >
-                            <Disc size={14} className={sortConfig.key === 'album' && sortConfig.direction === 'desc' ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                        </button>
-                        <button
-                            onClick={() => handleSort('random')}
-                            className={`p-1 rounded transition-colors ${sortConfig.key === 'random' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}
-                            title="Shuffle"
-                        >
-                            <Shuffle size={14} />
-                        </button>
+                        <button onClick={() => handleSort('filename')} className={`p-1 rounded transition-colors ${sortConfig.key === 'filename' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Filename"><FileText size={14} /></button>
+                        <button onClick={() => handleSort('artist')} className={`p-1 rounded transition-colors ${sortConfig.key === 'artist' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Artist"><User size={14} /></button>
+                        <button onClick={() => handleSort('title')} className={`p-1 rounded transition-colors ${sortConfig.key === 'title' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Title"><Music size={14} /></button>
+                        <button onClick={() => handleSort('random')} className={`p-1 rounded transition-colors ${sortConfig.key === 'random' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Shuffle"><Shuffle size={14} /></button>
                     </div>
                 </div>
 
                 <div className="flex gap-2 shrink-0">
-                    <button
-                        onClick={() => {
-                            if (playlist.length > 0) {
-                                onClearPlaylist();
-                                setPlaylist([]);
-                            }
-                        }}
-                        className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-200 rounded transition-colors"
-                        title="Clear Playlist"
-                    >
-                        <Trash2 size={14} />
-                    </button>
+                    <button onClick={() => { if (playlist.length > 0) { onClearPlaylist(); setPlaylist([]); } }} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-200 rounded transition-colors" title="Clear Playlist"><Trash2 size={14} /></button>
                     <label className="flex items-center gap-2 px-3 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
                         <Plus size={14} /> Add Audio & Lyrics
                         <input type="file" className="hidden" accept="audio/*,.lrc,.srt" multiple onChange={handleFileUpload} />
                     </label>
                     <div className="w-px h-4 bg-zinc-700 mx-1 self-center"></div>
-                    <button
-                        onClick={onClose}
-                        className="p-1 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded transition-colors"
-                        title="Close Playlist"
-                    >
-                        <X size={14} />
-                    </button>
+                    <button onClick={onClose} className="p-1 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded transition-colors" title="Close Playlist"><X size={14} /></button>
                 </div>
             </div>
 
@@ -309,6 +326,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     playlist.map((item, idx) => {
                         const isCurrent = idx === currentTrackIndex;
                         const isSelected = idx === selectedIndex;
+                        const isTranscribing = transcribingIds.has(item.id);
                         const lyrics = item.parsedLyrics || [];
                         const activeLyricIndex = isCurrent ? lyrics.findIndex((l, i) => {
                             if (l.endTime !== undefined) return currentTime >= l.time && currentTime < l.endTime;
@@ -317,22 +335,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                         }) : -1;
 
                         return (
-                            <div
-                                key={item.id}
-                                onClick={() => setSelectedIndex(idx)}
-                                className={`group relative flex gap-2 p-1.5 rounded-md border transition-all cursor-pointer
-                            ${isCurrent ? 'bg-zinc-800 border-orange-500/50 shadow-lg' : 'bg-zinc-900/50 border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700'}
-                            ${isSelected ? 'ring-2 ring-blue-500/70 ring-offset-1 ring-offset-zinc-950' : ''}
-                        `}
-                            >
-                                <div className="flex flex-col gap-1 shrink-0 w-48">
+                            <div key={item.id} onClick={() => setSelectedIndex(idx)} className={`group relative flex gap-2 p-1.5 rounded-md border transition-all cursor-pointer ${isCurrent ? 'bg-zinc-800 border-orange-500/50 shadow-lg' : 'bg-zinc-900/50 border-zinc-800 hover:bg-zinc-800 hover:border-zinc-700'} ${isSelected ? 'ring-2 ring-blue-500/70 ring-offset-1 ring-offset-zinc-950' : ''}`}>
+                                <div className="flex flex-col gap-1 shrink-0 w-44">
                                     <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => onPlayTrack(idx)}
-                                            className={`p-1.5 rounded-full transition-colors flex-shrink-0
-                                        ${isCurrent ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white'}
-                                    `}
-                                        >
+                                        <button onClick={() => onPlayTrack(idx)} className={`p-1.5 rounded-full transition-colors flex-shrink-0 ${isCurrent ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white'}`}>
                                             {isCurrent ? <Volume2 size={14} /> : <Play size={14} />}
                                         </button>
                                         <div className="flex-1 min-w-0">
@@ -340,50 +346,49 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                             <div className="text-[9px] text-zinc-500 truncate">{item.metadata.artist}</div>
                                         </div>
                                     </div>
-                                    <div className="ml-8 flex items-center gap-2">
-                                        <span className="text-[8px] text-zinc-600">{(item.audioFile.size / 1024 / 1024).toFixed(1)}MB</span>
-                                        {item.lyricFile ? (
-                                            <div className="flex items-center gap-0.5 text-[8px] px-1 rounded bg-blue-900/30 text-blue-300/80">
-                                                <FileText size={7} />
-                                                <span className="truncate max-w-[80px]">{item.lyricFile.name}</span>
-                                            </div>
-                                        ) : <span className="text-[8px] text-zinc-700 italic">No Lyrics</span>}
-                                    </div>
                                 </div>
-                                <div className="flex-1 min-w-0 h-12 bg-zinc-950/50 rounded border border-zinc-800/50 overflow-x-auto overflow-y-hidden custom-scrollbar">
+                                <div className="flex-1 min-w-0 h-12 bg-zinc-950/50 rounded border border-zinc-800/50 overflow-x-auto overflow-y-hidden custom-scrollbar flex items-center">
                                     {lyrics.length > 0 ? (
                                         <div className="relative h-full min-w-max flex items-center px-1">
                                             {lyrics.map((line, lIdx) => {
                                                 const isActive = lIdx === activeLyricIndex;
                                                 return (
-                                                    <div
-                                                        key={lIdx}
-                                                        id={isActive ? `lyric-active-${idx}` : undefined}
-                                                        className={`flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[9px] transition-colors whitespace-nowrap cursor-pointer
-                                                        ${isActive ? 'bg-orange-600 text-white border border-orange-400 shadow-[0_0_10px_rgba(234,88,12,0.3)]' : 'bg-zinc-800/50 hover:bg-blue-900/50 border border-zinc-700/30 hover:border-blue-500/50 text-zinc-400'}
-                                                    `}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            if (idx !== currentTrackIndex) {
-                                                                onPlayTrack(idx);
-                                                                setTimeout(() => onSeek(line.time), 150);
-                                                            } else onSeek(line.time);
-                                                        }}
-                                                    >
+                                                    <div key={lIdx} id={isActive ? `lyric-active-${idx}` : undefined} className={`flex items-center gap-1 px-1.5 py-0.5 mx-0.5 rounded text-[9px] transition-colors whitespace-nowrap cursor-pointer ${isActive ? 'bg-orange-600 text-white border border-orange-400' : 'bg-zinc-800/50 hover:bg-blue-900/50 border border-zinc-700/30 hover:border-blue-500/50 text-zinc-400'}`} onClick={(e) => { e.stopPropagation(); if (idx !== currentTrackIndex) onPlayTrack(idx); setTimeout(() => onSeek(line.time), 150); }}>
                                                         <span className={`font-mono text-[8px] ${isActive ? 'text-orange-200' : 'text-zinc-500'}`}>{formatTime(line.time)}</span>
                                                         <span className="truncate max-w-[120px]">{line.text || '♪'}</span>
                                                     </div>
                                                 )
                                             })}
                                         </div>
-                                    ) : <div className="h-full flex items-center justify-center text-zinc-700 text-[9px] italic">No lyric timeline</div>}
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center gap-2">
+                                            <span className="text-zinc-700 text-[9px] italic">No lyric timeline</span>
+                                        </div>
+                                    )}
                                 </div>
-                                <button
-                                    onClick={(e) => { e.stopPropagation(); removeTrack(idx); }}
-                                    className="p-1 text-zinc-600 hover:text-red-400 hover:bg-red-900/20 rounded opacity-0 group-hover:opacity-100 transition-opacity self-start"
-                                >
-                                    <Trash2 size={12} />
-                                </button>
+                                
+                                <div className="flex items-center gap-1 shrink-0 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); handleTranscribe(item); }}
+                                        className={`p-1.5 rounded bg-purple-900/30 border border-purple-500/30 text-purple-400 hover:bg-purple-800/50 transition-colors ${isTranscribing ? 'animate-pulse pointer-events-none' : ''}`}
+                                        title="AI Sync Transcribe"
+                                    >
+                                        {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                    </button>
+                                    
+                                    {lyrics.length > 0 && (
+                                        <div className="flex items-center gap-0.5 bg-zinc-800/50 rounded p-0.5 border border-zinc-700/50">
+                                            <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'txt'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download TXT">TXT</button>
+                                            <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'lrc'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download LRC">LRC</button>
+                                            <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'srt'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download SRT">SRT</button>
+                                            <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'json'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download JSON">JSON</button>
+                                        </div>
+                                    )}
+
+                                    <button onClick={(e) => { e.stopPropagation(); removeTrack(idx); }} className="p-1.5 text-zinc-600 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors">
+                                        <Trash2 size={14} />
+                                    </button>
+                                </div>
                             </div>
                         );
                     })

@@ -28,6 +28,7 @@ const DEFAULT_CONFIG: RenderConfig = {
     infoPosition: 'top-left',
     infoStyle: 'classic',
     infoMarginScale: 1.0,
+    infoSizeScale: 1.0,
     backgroundBlurStrength: 0,
     introMode: 'auto',
     introText: '',
@@ -456,9 +457,11 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
 
                     const newConfig = { ...DEFAULT_CONFIG, ...importedConfig };
 
-                    if (newConfig.backgroundBlurStrength) newConfig.backgroundBlurStrength = Number(newConfig.backgroundBlurStrength);
-                    if (newConfig.fontSizeScale) newConfig.fontSizeScale = Number(newConfig.fontSizeScale);
-                    if (newConfig.infoMarginScale) newConfig.infoMarginScale = Number(newConfig.infoMarginScale);
+                    // Ensure numeric conversion for scale parameters
+                    if (newConfig.backgroundBlurStrength !== undefined) newConfig.backgroundBlurStrength = Number(newConfig.backgroundBlurStrength);
+                    if (newConfig.fontSizeScale !== undefined) newConfig.fontSizeScale = Number(newConfig.fontSizeScale);
+                    if (newConfig.infoMarginScale !== undefined) newConfig.infoMarginScale = Number(newConfig.infoMarginScale);
+                    if (newConfig.infoSizeScale !== undefined) newConfig.infoSizeScale = Number(newConfig.infoSizeScale);
 
                     setConfig(newConfig);
 
@@ -473,11 +476,9 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                     } else {
                         setPreset('custom');
                     }
-                    // Alert removed for seamless experience
                 }
             } catch (err) {
                 console.error('Failed to parse settings file:', err);
-                // Alert removed
             }
         };
         reader.readAsText(file);
@@ -815,7 +816,7 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                         <Music size={14} /> Song Info Design
                     </h3>
 
-                    <div className="space-y-3">
+                    <div className="space-y-4">
                         <div className="space-y-1.5">
                             <label className="text-[10px] text-zinc-500 font-bold uppercase ml-1">Position</label>
                             <div className="grid grid-cols-3 gap-2">
@@ -891,6 +892,26 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                                     onChange={(e) => handleChange('infoMarginScale', parseFloat(e.target.value))}
                                     className="w-full h-1 bg-zinc-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
                                 />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <div className="flex justify-between items-center">
+                                <label className="text-[10px] text-zinc-500 font-bold uppercase ml-1">Info Size Scale</label>
+                                <span className="text-[10px] text-zinc-400 font-mono">{Math.round((config.infoSizeScale ?? 1.0) * 100)}%</span>
+                            </div>
+                            <div className="flex items-center gap-2 bg-zinc-800 border border-white/10 rounded-lg px-2 py-1.5">
+                                <span className="text-zinc-500"><Music size={12} /></span>
+                                <input
+                                    type="range"
+                                    min="0.1"
+                                    max="3.0"
+                                    step="0.1"
+                                    value={config.infoSizeScale ?? 1.0}
+                                    onChange={(e) => handleChange('infoSizeScale', parseFloat(e.target.value))}
+                                    className="w-full h-1 bg-zinc-600 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400 transition-all"
+                                />
+                                <span className="text-zinc-300"><Music size={16} /></span>
                             </div>
                         </div>
                     </div>

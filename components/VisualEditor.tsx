@@ -199,8 +199,13 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
         let currentStart = currentTime;
 
         for (const file of files) {
-          if (file.type.startsWith('video/')) continue;
-          const type = file.type.startsWith('image/') ? 'image' : 'audio';
+          const isVideo = file.type.startsWith('video/');
+          const isImage = file.type.startsWith('image/');
+          const isAudio = file.type.startsWith('audio/');
+          
+          if (!isVideo && !isImage && !isAudio) continue;
+
+          const type = isImage ? 'image' : (isVideo ? 'video' : 'audio');
           let itemDuration = 5;
 
           if (type !== 'image') {
@@ -216,7 +221,7 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
             startTime: currentStart,
             endTime: currentStart + itemDuration,
             name: file.name,
-            volume: type === 'audio' ? 1 : undefined
+            volume: type === 'audio' || type === 'video' ? 1 : undefined
           });
 
           currentStart += itemDuration;
@@ -554,7 +559,7 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
           <button onClick={handleClearAll} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-200 rounded transition-colors"><Trash2 size={14} /></button>
           <label className="flex items-center gap-2 px-3 py-1 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
             <Plus size={14} /> Import Media
-            <input type="file" className="hidden" accept="image/*,audio/*" multiple onChange={handleFileUpload} />
+            <input type="file" className="hidden" accept="image/*,audio/*,video/*" multiple onChange={handleFileUpload} />
           </label>
           <div className="w-px h-4 bg-zinc-700 mx-1 self-center"></div>
           <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-1 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded transition-colors"><X size={14} /></button>
@@ -584,8 +589,17 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
           <div className="absolute top-8 h-16 left-0 right-0 border-b border-white/5 bg-zinc-900/20">
             {slides.filter(s => s.type !== 'audio').map(slide => (
               <div key={slide.id} style={{ left: slide.startTime * pxPerSec, width: Math.max(10, (slide.endTime - slide.startTime) * pxPerSec) }} className={`absolute top-1 bottom-1 rounded-md overflow-hidden group bg-zinc-800 border shadow-sm select-none cursor-move ${(activeDrag?.id === slide.id || selectedSlideIds.includes(slide.id)) ? 'border-purple-400 z-30 shadow-xl opacity-90' : 'border-zinc-600 hover:border-zinc-400 z-10'} ${selectedSlideIds.includes(slide.id) ? 'ring-2 ring-blue-500/70 ring-offset-zinc-950' : ''}`} onMouseDown={(e) => handleMouseDown(e, slide.id, 'move')}>
-                <img src={slide.url} className="w-full h-full object-cover opacity-60 pointer-events-none" draggable={false} alt={slide.name} />
-                <div className="absolute inset-0 p-1 pointer-events-none flex flex-col justify-end"><span className="text-[10px] font-bold drop-shadow-md truncate text-zinc-200 bg-black/30 px-1 rounded w-max max-w-full">{slide.name}</span></div>
+                {slide.type === 'video' ? (
+                  <video src={slide.url} className="w-full h-full object-cover opacity-60 pointer-events-none" draggable={false} />
+                ) : (
+                  <img src={slide.url} className="w-full h-full object-cover opacity-60 pointer-events-none" draggable={false} alt={slide.name} />
+                )}
+                <div className="absolute inset-0 p-1 pointer-events-none flex flex-col justify-end">
+                  <div className="flex items-center gap-1">
+                    {slide.type === 'video' && <Film size={10} className="text-purple-300" />}
+                    <span className="text-[10px] font-bold drop-shadow-md truncate text-zinc-200 bg-black/30 px-1 rounded w-max max-w-full">{slide.name}</span>
+                  </div>
+                </div>
                 <button onClick={(e) => { e.stopPropagation(); removeSlide(slide.id); }} className="absolute top-1 right-4 p-0.5 bg-black/60 hover:bg-red-500 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-30"><X size={10} /></button>
                 <div className="absolute top-0 bottom-0 left-0 w-3 cursor-w-resize flex items-center justify-center bg-black/20 hover:bg-purple-500/80 transition-colors z-20" onMouseDown={(e) => handleMouseDown(e, slide.id, 'resize-start')}><GripHorizontal size={10} className="text-white/70 rotate-90" /></div>
                 <div className="absolute top-0 bottom-0 right-0 w-3 cursor-e-resize flex items-center justify-center bg-black/20 hover:bg-purple-500/80 transition-colors z-20" onMouseDown={(e) => handleMouseDown(e, slide.id, 'resize-end')}><GripHorizontal size={10} className="text-white/70 rotate-90" /></div>
@@ -600,7 +614,7 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
               <div key={slide.id} style={{ left: slide.startTime * pxPerSec, width: Math.max(10, (slide.endTime - slide.startTime) * pxPerSec) }} className={`absolute top-1 bottom-1 rounded-md overflow-hidden group bg-emerald-900/50 border shadow-sm select-none cursor-move ${(activeDrag?.id === slide.id || selectedSlideIds.includes(slide.id)) ? 'border-emerald-400 z-30 shadow-xl opacity-90' : 'border-emerald-700/50 hover:border-emerald-500 z-10'} ${selectedSlideIds.includes(slide.id) ? 'ring-2 ring-blue-500/70 ring-offset-zinc-950' : ''}`} onMouseDown={(e) => handleMouseDown(e, slide.id, 'move')}>
                 <div className="absolute inset-0 flex items-center justify-center opacity-30"><Volume2 size={16} className="text-emerald-200" /></div>
                 <div className="absolute inset-0 p-1 pointer-events-none flex flex-col justify-center"><span className="text-[9px] font-bold drop-shadow-md truncate text-emerald-100 px-1">{slide.name}</span></div>
-                <button onClick={(e) => { e.stopPropagation(); setSlides(prev => prev.map(s => s.id === slide.id ? { ...s, isMuted: !s.isMuted } : s)); }} className="absolute top-1 right-10 p-0.5 bg-black/60 hover:bg-emerald-600 rounded text-white opacity-0 group-hover:opacity-100 cursor-pointer z-40">{slide.isMuted === true ? <VolumeX size={10} /> : <Volume2 size={10} />}</button>
+                <button onClick={(e) => { e.stopPropagation(); setSlides(prev => prev.map(s => s.id === slide.id ? { ...s, isMuted: !s.isMuted } : s)); }} className="absolute top-1 right-10 p-0.5 bg-black/60 hover:bg-emerald-600 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-40">{slide.isMuted === true ? <VolumeX size={10} /> : <Volume2 size={10} />}</button>
                 <button onClick={(e) => { e.stopPropagation(); removeSlide(slide.id); }} className="absolute top-1 right-3 p-0.5 bg-black/60 hover:bg-red-500 rounded text-white opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-40"><X size={10} /></button>
                 <div className="absolute top-0 bottom-0 left-0 w-2 cursor-w-resize flex items-center justify-center hover:bg-emerald-500/50 transition-colors z-20" onMouseDown={(e) => handleMouseDown(e, slide.id, 'resize-start')}></div>
                 <div className="absolute top-0 bottom-0 right-0 w-2 cursor-e-resize flex items-center justify-center hover:bg-emerald-500/50 transition-colors z-20" onMouseDown={(e) => handleMouseDown(e, slide.id, 'resize-end')}></div>

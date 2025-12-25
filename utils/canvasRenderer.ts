@@ -519,6 +519,7 @@ export const drawCanvasFrame = (
         const showInfo = renderConfig ? (renderConfig.showTitle || renderConfig.showArtist) : true;
         const showCover = renderConfig ? renderConfig.showCover : true;
         if (showInfo || showCover) {
+            const infoScale = renderConfig?.infoSizeScale ?? 1.0;
             if (activePreset === 'custom') {
                 const pos = renderConfig?.infoPosition || 'top-left';
                 const style = renderConfig?.infoStyle || 'classic';
@@ -536,15 +537,15 @@ export const drawCanvasFrame = (
                 if (pos.includes('top')) { y = margin; vertical = 'top'; }
                 else { y = height - margin; vertical = 'bottom'; }
 
-                const coverSize = (style === 'minimal' || style === 'modern') ? 0 : 100 * scale;
+                const coverSize = (style === 'minimal' || style === 'modern') ? 0 : 100 * scale * infoScale;
                 const hasCover = showCover && coverSize > 0 && (metadata.coverUrl !== null);
                 const coverImg = hasCover ? (metadata.backgroundType === 'video' ? videos.get('background') : images.get('cover')) : null;
 
-                const titleSize = (style === 'minimal' ? 20 : (style === 'modern' || style === 'modern_art') ? 40 : 28) * scale;
-                const artistSize = (style === 'minimal' ? 14 : (style === 'modern' || style === 'modern_art') ? 24 : 18) * scale;
+                const titleSize = (style === 'minimal' ? 20 : (style === 'modern' || style === 'modern_art') ? 40 : 28) * scale * infoScale;
+                const artistSize = (style === 'minimal' ? 14 : (style === 'modern' || style === 'modern_art') ? 24 : 18) * scale * infoScale;
                 const titleFont = `bold ${titleSize}px ${fontFamily}`;
                 const artistFont = `${artistSize}px ${fontFamily}`;
-                const gap = 20 * scale;
+                const gap = 20 * scale * infoScale;
 
                 const mainColor = renderConfig?.fontColor || '#ffffff';
                 const artistColor = (style === 'modern' || style === 'modern_art') ? mainColor : (renderConfig?.fontColor || '#d4d4d8');
@@ -566,7 +567,7 @@ export const drawCanvasFrame = (
                         }
                         if (renderConfig?.showTitle ?? true) {
                             ctx.fillStyle = mainColor; ctx.font = titleFont;
-                            ctx.fillText(metadata.title, x, curY); curY += titleSize + 5 * scale;
+                            ctx.fillText(metadata.title, x, curY); curY += titleSize + 5 * scale * infoScale;
                         }
                         if (renderConfig?.showArtist ?? true) {
                             ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, x, curY);
@@ -575,7 +576,7 @@ export const drawCanvasFrame = (
                         ctx.textBaseline = 'bottom';
                         if (renderConfig?.showArtist ?? true) {
                             ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, x, curY);
-                            curY -= (artistSize + 5 * scale);
+                            curY -= (artistSize + 5 * scale * infoScale);
                         }
                         if (renderConfig?.showTitle ?? true) {
                             ctx.fillStyle = mainColor; ctx.font = titleFont; ctx.fillText(metadata.title, x, curY);
@@ -592,7 +593,7 @@ export const drawCanvasFrame = (
                 } else {
                     ctx.textAlign = align; ctx.textBaseline = 'top';
                     const isRight = align === 'right';
-                    const textTotalH = (renderConfig?.showTitle ? titleSize : 0) + (renderConfig?.showArtist ? artistSize + 5 * scale : 0);
+                    const textTotalH = (renderConfig?.showTitle ? titleSize : 0) + (renderConfig?.showArtist ? artistSize + 5 * scale * infoScale : 0);
                     const blockH = Math.max(coverSize, textTotalH);
                     const startY = vertical === 'top' ? y : y - blockH;
 
@@ -608,7 +609,7 @@ export const drawCanvasFrame = (
                     let textY = startY + (blockH - textTotalH) / 2;
                     if (renderConfig?.showTitle ?? true) {
                         ctx.fillStyle = mainColor; ctx.font = titleFont; ctx.fillText(metadata.title, curX, textY);
-                        textY += titleSize + 5 * scale;
+                        textY += titleSize + 5 * scale * infoScale;
                     }
                     if (renderConfig?.showArtist ?? true) {
                         ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, curX, textY);
@@ -620,18 +621,18 @@ export const drawCanvasFrame = (
                     let bottomMargin = 80 * scale;
                     if (['testing', 'testing_up', 'one_line', 'one_line_up'].includes(activePreset)) bottomMargin = 120 * scale;
                     if (renderConfig?.showTitle ?? true) {
-                        ctx.font = `bold ${20 * scale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
-                        ctx.fillText(metadata.title, width / 2, height - bottomMargin - (30 * scale));
+                        ctx.font = `bold ${20 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
+                        ctx.fillText(metadata.title, width / 2, height - bottomMargin - (30 * scale * infoScale));
                     }
                     if (renderConfig?.showArtist ?? true) {
-                        ctx.font = `${16 * scale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
+                        ctx.font = `${16 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
                         ctx.fillText(metadata.artist, width / 2, height - bottomMargin);
                     }
                 }
             } else {
-                const margin = 40 * scale * (renderConfig?.infoMarginScale ?? 1), isSq = width === height, thumbSize = (isPortrait ? (isSq ? 110 : 150) : 100) * scale;
+                const margin = 40 * scale * (renderConfig?.infoMarginScale ?? 1), isSq = width === height, thumbSize = (isPortrait ? (isSq ? 110 : 150) : 100) * scale * infoScale;
                 const coverImg = metadata.coverUrl ? images.get('cover') : null;
-                const r = 12 * scale;
+                const r = 12 * scale * infoScale;
                 if (isPortrait) {
                     const startY = margin * (isSq ? 1.5 : 3), centerX = width / 2, imgX = centerX - thumbSize / 2, imgY = startY;
                     if (showCover) {
@@ -642,14 +643,14 @@ export const drawCanvasFrame = (
                     }
                     if (showInfo) {
                         ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-                        const titleY = imgY + (showCover ? thumbSize + 25 * scale : 0);
+                        const titleY = imgY + (showCover ? thumbSize + 25 * scale * infoScale : 0);
                         if (renderConfig?.showTitle ?? true) {
-                            ctx.font = `bold ${(isSq ? 26 : 36) * scale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
+                            ctx.font = `bold ${(isSq ? 26 : 36) * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
                             ctx.fillText(metadata.title, centerX, titleY);
                         }
                         if (renderConfig?.showArtist ?? true) {
-                            ctx.font = `${(isSq ? 18 : 24) * scale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
-                            ctx.fillText(metadata.artist, centerX, titleY + ((renderConfig?.showTitle ?? true) ? (isSq ? 30 : 40) * scale : 0));
+                            ctx.font = `${(isSq ? 18 : 24) * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
+                            ctx.fillText(metadata.artist, centerX, titleY + ((renderConfig?.showTitle ?? true) ? (isSq ? 30 : 40) * scale * infoScale : 0));
                         }
                     }
                 } else {
@@ -662,14 +663,14 @@ export const drawCanvasFrame = (
                     }
                     if (showInfo) {
                         ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-                        const titleX = x + (showCover ? thumbSize + 25 * scale : 0), titleSize = 28 * scale, titleY = y + thumbSize / 2 - titleSize;
+                        const titleX = x + (showCover ? thumbSize + 25 * scale * infoScale : 0), titleSize = 28 * scale * infoScale, titleY = y + thumbSize / 2 - titleSize;
                         if (renderConfig?.showTitle ?? true) {
                             ctx.font = `bold ${titleSize}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
                             ctx.fillText(metadata.title, titleX, titleY);
                         }
                         if (renderConfig?.showArtist ?? true) {
-                            ctx.font = `${18 * scale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
-                            ctx.fillText(metadata.artist, titleX, titleY + ((renderConfig?.showTitle ?? true) ? titleSize + 5 * scale : 0));
+                            ctx.font = `${18 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
+                            ctx.fillText(metadata.artist, titleX, titleY + ((renderConfig?.showTitle ?? true) ? titleSize + 5 * scale * infoScale : 0));
                         }
                     }
                 }

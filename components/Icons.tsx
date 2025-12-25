@@ -52,7 +52,12 @@ import {
   AlignVerticalJustifyStart,
   AlignVerticalJustifyEnd,
   RotateCcw,
-  Keyboard
+  Keyboard,
+  Sparkles,
+  Loader2,
+  FileJson,
+  FileType,
+  FileDown
 } from 'lucide-react';
 
 export {
@@ -110,5 +115,10 @@ export {
   AlignVerticalJustifyStart,
   AlignVerticalJustifyEnd,
   RotateCcw,
-  Keyboard
+  Keyboard,
+  Sparkles,
+  Loader2,
+  FileJson,
+  FileType,
+  FileDown
 };

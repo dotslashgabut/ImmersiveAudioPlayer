@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
@@ -94,6 +95,7 @@ function App() {
     infoPosition: 'top-left',
     infoStyle: 'classic',
     infoMarginScale: 1.0,
+    infoSizeScale: 1.0,
     backgroundBlurStrength: 0,
     introMode: 'auto',
     introText: '',
@@ -696,7 +698,16 @@ function App() {
               if (Math.abs(v.currentTime - rel) > 0.5) v.currentTime = rel;
               const shouldMute = s.isMuted !== false;
               if (v.muted !== shouldMute) v.muted = shouldMute;
-              if (v.paused) v.play().catch(() => { });
+              // Use correct specific slide volume instead of компонент-wide activeSlide
+              const targetVolume = s.volume !== undefined ? s.volume : 1;
+              if (Math.abs(v.volume - targetVolume) > 0.01) v.volume = targetVolume;
+              
+              // Correct typos (vid -> v) and use audioEl.paused to determine playback state during render
+              if (!audioEl.paused && v.paused) {
+                v.play().catch(() => { });
+              } else if (audioEl.paused && !v.paused) {
+                v.pause();
+              }
             } else {
               if (!v.paused) v.pause();
               if (!v.muted) v.muted = true;
@@ -710,11 +721,17 @@ function App() {
         const s = visualSlides.find(sl => sl.id === id);
         if (s) {
           if (t >= s.startTime && t < s.endTime) {
-            const rel = t - s.startTime;
-            if (Math.abs(a.currentTime - rel) > 0.2) a.currentTime = rel;
+            // Use accurate time 't' from audio element for synchronization
+            const relTime = t - s.startTime;
+            if (Math.abs(a.currentTime - relTime) > 0.2) a.currentTime = relTime;
             const shouldMute = s.isMuted === true;
             if (a.muted !== shouldMute) a.muted = shouldMute;
-            if (a.paused) a.play().catch(() => { });
+            const targetVol = s.volume !== undefined ? s.volume : 1;
+            if (Math.abs(a.volume - targetVol) > 0.01) a.volume = targetVol;
+            
+            // Correct typos (aud -> a) and ensure playback synchronization
+            if (!audioEl.paused && a.paused) a.play().catch(() => { });
+            else if (audioEl.paused && !a.paused) a.pause();
           } else {
             if (!a.paused) a.pause();
             if (!a.muted) a.muted = true;
