@@ -85,7 +85,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             },
                         },
                         {
-                            text: "Transcribe this audio into high-precision LRC-style synchronized lyrics. Return a JSON array of objects. Each object MUST have a 'time' property (start time in seconds as a number) and a 'text' property (the spoken words). IMPORTANT: For long instrumental sections or pauses (over 4 seconds), include an entry with an empty text string to clear the screen, just like professional LRC files. Do not include end times; the timeline should rely on the start time of the next phrase."
+                            text: "Transcribe this audio into high-precision synchronized lyrics. Return a JSON array of objects. Each object MUST have 'time' (start in seconds), 'endTime' (end of vocal in seconds), and 'text' (the lyrics). Do not include your own blank lines in the JSON; the export logic will handle clearing based on endTime gaps."
                         }
                     ]
                 },
@@ -98,14 +98,18 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             properties: {
                                 time: {
                                     type: Type.NUMBER,
-                                    description: 'The start time in seconds (LRC style).',
+                                    description: 'Start time in seconds.',
+                                },
+                                endTime: {
+                                    type: Type.NUMBER,
+                                    description: 'End time when vocal stops in seconds.',
                                 },
                                 text: {
                                     type: Type.STRING,
-                                    description: 'The lyric text or empty string for clearing.',
+                                    description: 'Lyric text.',
                                 },
                             },
-                            required: ["time", "text"],
+                            required: ["time", "endTime", "text"],
                         },
                     },
                 },
@@ -114,13 +118,8 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             const rawText = response.text || "[]";
             const transcribedLyrics: LyricLine[] = JSON.parse(rawText);
 
-            // Ensure we strictly follow LRC logic: sort by time and strip any accidental endTimes
-            const lrcCompatibleLyrics = transcribedLyrics
-                .sort((a, b) => a.time - b.time)
-                .map(l => ({ time: l.time, text: l.text }));
-
             setPlaylist(prev => prev.map(p => 
-                p.id === item.id ? { ...p, parsedLyrics: lrcCompatibleLyrics } : p
+                p.id === item.id ? { ...p, parsedLyrics: transcribedLyrics.sort((a, b) => a.time - b.time) } : p
             ));
         } catch (err) {
             console.error("Transcription failed:", err);
@@ -159,7 +158,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             content = JSON.stringify(rawLyrics, null, 2);
         } else if (format === 'srt') {
             content = rawLyrics.map((l, i) => {
-                const nextTime = rawLyrics[i + 1]?.time || l.time + 3;
+                const effectiveEnd = l.endTime || (rawLyrics[i + 1]?.time || l.time + 3);
                 const toTimestamp = (sec: number) => {
                     const hrs = Math.floor(sec / 3600).toString().padStart(2, '0');
                     const mins = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
@@ -167,11 +166,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     const ms = Math.floor((sec % 1) * 1000).toString().padStart(3, '0');
                     return `${hrs}:${mins}:${secs},${ms}`;
                 };
-                return `${i + 1}\n${toTimestamp(l.time)} --> ${toTimestamp(nextTime)}\n${l.text}\n`;
+                return `${i + 1}\n${toTimestamp(l.time)} --> ${toTimestamp(effectiveEnd)}\n${l.text}\n`;
             }).join("\n");
         } else if (format === 'lrc') {
             const lrcLines: string[] = [];
-            
             const formatLrcTime = (sec: number) => {
                 const mins = Math.floor(sec / 60).toString().padStart(2, '0');
                 const secs = (sec % 60).toFixed(2).padStart(5, '0');
@@ -182,18 +180,26 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 const current = rawLyrics[i];
                 const next = rawLyrics[i + 1];
                 
+                // Add current lyric
                 lrcLines.push(`${formatLrcTime(current.time)}${current.text}`);
                 
-                if (next && (next.time - current.time) > 4) {
-                    lrcLines.push(`${formatLrcTime(current.time + 3)}`);
+                // Effective end time of current line
+                const currentEnd = current.endTime || current.time + 2;
+
+                if (next) {
+                    // If gap between current vocal end and next vocal start > 4s, clear screen
+                    if (next.time - currentEnd > 4) {
+                        lrcLines.push(`${formatLrcTime(currentEnd)}`);
+                    }
+                } else {
+                    // Last line special logic
+                    const audioDuration = item.duration || 0;
+                    // If audio still has > 4s after last vocal end, clear screen after 4s (per user example)
+                    if (audioDuration > 0 && (audioDuration - currentEnd > 4)) {
+                        lrcLines.push(`${formatLrcTime(currentEnd + 4)}`);
+                    }
                 }
             }
-            
-            const lastLine = rawLyrics[rawLyrics.length - 1];
-            if (lastLine) {
-                lrcLines.push(`${formatLrcTime(lastLine.time + 3)}`);
-            }
-            
             content = lrcLines.join("\n");
         }
 
@@ -243,30 +249,56 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             });
 
             const newItems: PlaylistItem[] = [];
-            const extractMetadata = async (file: File, fallbackTitle: string): Promise<{ title: string; artist: string; album?: string; coverUrl: string | null }> => {
+            const extractMetadata = async (file: File, fallbackTitle: string): Promise<{ title: string; artist: string; album?: string; coverUrl: string | null; duration: number }> => {
                 return new Promise((resolve) => {
                     const jsmediatags = (window as any).jsmediatags;
-                    if (!jsmediatags) { resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null }); return; }
-                    jsmediatags.read(file, {
-                        onSuccess: (tag: any) => {
-                            const { title, artist, album, picture } = tag.tags;
-                            let coverUrl: string | null = null;
-                            if (picture) {
-                                const { data, format } = picture;
-                                let base64String = "";
-                                for (let i = 0; i < data.length; i++) base64String += String.fromCharCode(data[i]);
-                                coverUrl = `data:${format};base64,${window.btoa(base64String)}`;
-                            }
-                            resolve({ title: title || fallbackTitle, artist: artist || 'Unknown Artist', album: album || undefined, coverUrl });
-                        },
-                        onError: () => resolve({ title: fallbackTitle, artist: 'Unknown Artist', coverUrl: null })
+                    const audio = new Audio();
+                    audio.src = URL.createObjectURL(file);
+                    
+                    const getDuration = () => new Promise<number>((res) => {
+                        audio.onloadedmetadata = () => res(audio.duration);
+                        setTimeout(() => res(0), 2000);
                     });
+
+                    const finish = (tags: any, dur: number) => {
+                        const { title, artist, album, picture } = tags || {};
+                        let coverUrl: string | null = null;
+                        if (picture) {
+                            const { data, format } = picture;
+                            let base64String = "";
+                            for (let i = 0; i < data.length; i++) base64String += String.fromCharCode(data[i]);
+                            coverUrl = `data:${format};base64,${window.btoa(base64String)}`;
+                        }
+                        URL.revokeObjectURL(audio.src);
+                        resolve({ 
+                            title: title || fallbackTitle, 
+                            artist: artist || 'Unknown Artist', 
+                            album: album || undefined, 
+                            coverUrl,
+                            duration: dur
+                        });
+                    };
+
+                    if (!jsmediatags) { 
+                        getDuration().then(d => finish(null, d));
+                    } else {
+                        jsmediatags.read(file, {
+                            onSuccess: async (tag: any) => {
+                                const d = await getDuration();
+                                finish(tag.tags, d);
+                            },
+                            onError: async () => {
+                                const d = await getDuration();
+                                finish(null, d);
+                            }
+                        });
+                    }
                 });
             };
 
             for (const [basename, group] of fileGroups.entries()) {
                 if (group.audio) {
-                    const metadata = await extractMetadata(group.audio, basename);
+                    const meta = await extractMetadata(group.audio, basename);
                     const id = Math.random().toString(36).substr(2, 9);
                     let itemParsedLyrics: LyricLine[] = [];
                     if (group.lyric) {
@@ -275,7 +307,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                         if (ext === 'lrc') itemParsedLyrics = parseLRC(text);
                         else if (ext === 'srt') itemParsedLyrics = parseSRT(text);
                     }
-                    newItems.push({ id, audioFile: group.audio, lyricFile: group.lyric, parsedLyrics: itemParsedLyrics, metadata, duration: 0 });
+                    newItems.push({ 
+                        id, 
+                        audioFile: group.audio, 
+                        lyricFile: group.lyric, 
+                        parsedLyrics: itemParsedLyrics, 
+                        metadata: { title: meta.title, artist: meta.artist, album: meta.album, coverUrl: meta.coverUrl }, 
+                        duration: meta.duration 
+                    });
                 }
             }
             if (newItems.length > 0) setPlaylist(prev => [...prev, ...newItems]);
