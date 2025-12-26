@@ -534,6 +534,14 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
             <Film size={16} className="text-purple-400" /> Timeline
           </h2>
           <div className="w-px h-4 bg-zinc-700"></div>
+
+          <label className="flex items-center gap-2 px-3 py-1 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
+            <Plus size={14} /> Import Media
+            <input type="file" className="hidden" accept="image/*,audio/*,video/*" multiple onChange={handleFileUpload} />
+          </label>
+
+          <div className="w-px h-4 bg-zinc-700"></div>
+
           <div className="flex items-center gap-1">
             <button onClick={() => setPxPerSec(prev => Math.max(10, prev - 10))} className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white"><ZoomOut size={14} /></button>
             <div className="text-[10px] text-zinc-500 font-mono min-w-[50px] text-center">{pxPerSec}px/s</div>
@@ -557,10 +565,6 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={handleClearAll} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-200 rounded transition-colors"><Trash2 size={14} /></button>
-          <label className="flex items-center gap-2 px-3 py-1 bg-purple-600 hover:bg-purple-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
-            <Plus size={14} /> Import Media
-            <input type="file" className="hidden" accept="image/*,audio/*,video/*" multiple onChange={handleFileUpload} />
-          </label>
           <div className="w-px h-4 bg-zinc-700 mx-1 self-center"></div>
           <button onClick={(e) => { e.stopPropagation(); onClose(); }} className="p-1 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded transition-colors"><X size={14} /></button>
         </div>

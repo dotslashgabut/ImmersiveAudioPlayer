@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { PlaylistItem, LyricLine } from '../types';
-import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown } from './Icons';
+import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown, ChevronDown } from './Icons';
 import { formatTime, parseLRC, parseSRT } from '../utils/parsers';
 // Use correct import for GoogleGenAI and Type
 import { GoogleGenAI, Type } from "@google/genai";
@@ -22,6 +22,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
     const [transcribingIds, setTranscribingIds] = useState<Set<string>>(new Set());
+    const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-flash'>('gemini-2.5-flash');
 
     const handleSort = (type: 'filename' | 'artist' | 'title' | 'album' | 'random') => {
         if (playlist.length === 0) return;
@@ -71,12 +72,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
 
         try {
             const base64Data = await fileToBase64(item.audioFile);
-            // Initialize ai with apiKey from process.env.API_KEY
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // Use ai.models.generateContent with proper configuration for JSON output and Type from @google/genai
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: selectedModel,
                 contents: {
                     parts: [
                         {
@@ -86,7 +85,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             },
                         },
                         {
-                            text: "Transcribe this audio precisely into synchronized lyrics. Return a JSON array of objects representing synchronized lyrics. Each object MUST have a 'time' property (start time in seconds as a number) and a 'text' property (the spoken words)."
+                            text: "Transcribe this audio into high-precision LRC-style synchronized lyrics. Return a JSON array of objects. Each object MUST have a 'time' property (start time in seconds as a number) and a 'text' property (the spoken words). IMPORTANT: For long instrumental sections or pauses (over 4 seconds), include an entry with an empty text string to clear the screen, just like professional LRC files. Do not include end times; the timeline should rely on the start time of the next phrase."
                         }
                     ]
                 },
@@ -99,11 +98,11 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             properties: {
                                 time: {
                                     type: Type.NUMBER,
-                                    description: 'The start time in seconds.',
+                                    description: 'The start time in seconds (LRC style).',
                                 },
                                 text: {
                                     type: Type.STRING,
-                                    description: 'The lyric text.',
+                                    description: 'The lyric text or empty string for clearing.',
                                 },
                             },
                             required: ["time", "text"],
@@ -112,12 +111,16 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 },
             });
 
-            // Access response text directly as property per guidelines
             const rawText = response.text || "[]";
             const transcribedLyrics: LyricLine[] = JSON.parse(rawText);
 
+            // Ensure we strictly follow LRC logic: sort by time and strip any accidental endTimes
+            const lrcCompatibleLyrics = transcribedLyrics
+                .sort((a, b) => a.time - b.time)
+                .map(l => ({ time: l.time, text: l.text }));
+
             setPlaylist(prev => prev.map(p => 
-                p.id === item.id ? { ...p, parsedLyrics: transcribedLyrics.sort((a, b) => a.time - b.time) } : p
+                p.id === item.id ? { ...p, parsedLyrics: lrcCompatibleLyrics } : p
             ));
         } catch (err) {
             console.error("Transcription failed:", err);
@@ -297,20 +300,41 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                         Playlist
                     </h2>
                     <div className="w-px h-4 bg-zinc-700"></div>
+
+                    <label className="flex items-center gap-2 px-3 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
+                        <Plus size={14} /> Add Audio & Lyrics
+                        <input type="file" className="hidden" accept="audio/*,.lrc,.srt" multiple onChange={handleFileUpload} />
+                    </label>
+
+                    <div className="w-px h-4 bg-zinc-700"></div>
+
                     <div className="flex items-center gap-1">
                         <button onClick={() => handleSort('filename')} className={`p-1 rounded transition-colors ${sortConfig.key === 'filename' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Filename"><FileText size={14} /></button>
                         <button onClick={() => handleSort('artist')} className={`p-1 rounded transition-colors ${sortConfig.key === 'artist' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Artist"><User size={14} /></button>
                         <button onClick={() => handleSort('title')} className={`p-1 rounded transition-colors ${sortConfig.key === 'title' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Sort by Title"><Music size={14} /></button>
                         <button onClick={() => handleSort('random')} className={`p-1 rounded transition-colors ${sortConfig.key === 'random' ? 'bg-zinc-700 text-white' : 'hover:bg-zinc-700 text-zinc-400 hover:text-white'}`} title="Shuffle"><Shuffle size={14} /></button>
                     </div>
+
+                    <div className="w-px h-4 bg-zinc-700"></div>
+
+                    <div className="relative group">
+                        <select
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value as any)}
+                            className="appearance-none bg-zinc-800/80 border border-white/10 text-zinc-300 text-[10px] font-medium rounded px-2 pr-6 h-7 focus:outline-none focus:border-orange-500 cursor-pointer hover:bg-zinc-700 transition-colors"
+                            title="Select AI Model for Transcription"
+                        >
+                            <option value="gemini-2.5-flash" className="bg-zinc-900 text-xs">Gemini 2.5 Flash</option>
+                            <option value="gemini-3-flash-preview" className="bg-zinc-900 text-xs">Gemini 3 Flash</option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-zinc-500">
+                            <ChevronDown size={10} />
+                        </div>
+                    </div>
                 </div>
 
                 <div className="flex gap-2 shrink-0">
                     <button onClick={() => { if (playlist.length > 0) { onClearPlaylist(); setPlaylist([]); } }} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-200 rounded transition-colors" title="Clear Playlist"><Trash2 size={14} /></button>
-                    <label className="flex items-center gap-2 px-3 py-1 bg-orange-600 hover:bg-orange-500 rounded text-xs font-medium cursor-pointer transition-colors text-white whitespace-nowrap">
-                        <Plus size={14} /> Add Audio & Lyrics
-                        <input type="file" className="hidden" accept="audio/*,.lrc,.srt" multiple onChange={handleFileUpload} />
-                    </label>
                     <div className="w-px h-4 bg-zinc-700 mx-1 self-center"></div>
                     <button onClick={onClose} className="p-1 hover:bg-zinc-700 text-zinc-400 hover:text-white rounded transition-colors" title="Close Playlist"><X size={14} /></button>
                 </div>
@@ -371,7 +395,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                     <button 
                                         onClick={(e) => { e.stopPropagation(); handleTranscribe(item); }}
                                         className={`p-1.5 rounded bg-purple-900/30 border border-purple-500/30 text-purple-400 hover:bg-purple-800/50 transition-colors ${isTranscribing ? 'animate-pulse pointer-events-none' : ''}`}
-                                        title="AI Sync Transcribe"
+                                        title={`AI Sync Transcribe using ${selectedModel === 'gemini-3-flash-preview' ? 'v3' : 'v2.5'}`}
                                     >
                                         {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                                     </button>
