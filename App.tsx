@@ -694,7 +694,8 @@ function App() {
           const s = visualSlides.find(sl => sl.id === id);
           if (s) {
             if (t >= s.startTime && t < s.endTime) {
-              const rel = t - s.startTime;
+              // Calculate relative time including mediaStartOffset
+              const rel = (t - s.startTime) + (s.mediaStartOffset || 0);
               if (Math.abs(v.currentTime - rel) > 0.5) v.currentTime = rel;
               const shouldMute = s.isMuted !== false;
               if (v.muted !== shouldMute) v.muted = shouldMute;
@@ -721,8 +722,8 @@ function App() {
         const s = visualSlides.find(sl => sl.id === id);
         if (s) {
           if (t >= s.startTime && t < s.endTime) {
-            // Use accurate time 't' from audio element for synchronization
-            const relTime = t - s.startTime;
+            // Use accurate time 't' from audio element for synchronization plus mediaStartOffset
+            const relTime = (t - s.startTime) + (s.mediaStartOffset || 0);
             if (Math.abs(a.currentTime - relTime) > 0.2) a.currentTime = relTime;
             const shouldMute = s.isMuted === true;
             if (a.muted !== shouldMute) a.muted = shouldMute;
@@ -924,7 +925,7 @@ function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      const ignoredKeysForIdle = [' ', 'k', 's', 't', 'l', 'r', 'f', 'h', 'm', 'j', 'd', 'e', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'meta', 'control', 'shift', 'alt', 'printscreen', 'fn', '+', '-', '='];
+      const ignoredKeysForIdle = [' ', 'k', 's', 't', 'l', 'r', 'f', 'h', 'm', 'j', 'd', 'e', 'x', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'meta', 'control', 'shift', 'alt', 'printscreen', 'fn', '+', '-', '='];
 
       if (!ignoredKeysForIdle.includes(key)) {
         resetIdleTimer();
@@ -1104,7 +1105,8 @@ function App() {
       if (isRendering) {
         if (!vid.paused) vid.pause();
       } else {
-        const relTime = currentTime - activeSlide.startTime;
+        // Updated to use mediaStartOffset
+        const relTime = (currentTime - activeSlide.startTime) + (activeSlide.mediaStartOffset || 0);
         if (Math.abs(vid.currentTime - relTime) > 0.1) {
           vid.currentTime = relTime;
         }
@@ -1125,7 +1127,8 @@ function App() {
     activeAudioSlides.forEach(s => {
       const aud = document.getElementById(`audio-preview-${s.id}`) as HTMLAudioElement;
       if (aud) {
-        const relTime = currentTime - s.startTime;
+        // Updated to use mediaStartOffset
+        const relTime = (currentTime - s.startTime) + (s.mediaStartOffset || 0);
         if (Math.abs(aud.currentTime - relTime) > 0.2) aud.currentTime = relTime;
         const shouldMute = s.isMuted === true;
         if (aud.muted !== shouldMute) aud.muted = shouldMute;

@@ -15,6 +15,7 @@ export interface VisualSlide {
   mediaDuration?: number; // Duration of the video media itself
   isMuted?: boolean;
   volume?: number; // 0 to 1
+  mediaStartOffset?: number; // Start playback from this timestamp in the source file
 }
 
 export interface AudioMetadata {

@@ -1,3 +1,4 @@
+
 import {
   Play,
   Pause,
@@ -57,7 +58,8 @@ import {
   Loader2,
   FileJson,
   FileType,
-  FileDown
+  FileDown,
+  Split
 } from 'lucide-react';
 
 export {
@@ -120,5 +122,6 @@ export {
   Loader2,
   FileJson,
   FileType,
-  FileDown
+  FileDown,
+  Split
 };

@@ -1,6 +1,7 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { VisualSlide, LyricLine } from '../types';
-import { Plus, X, ImageIcon, GripHorizontal, ZoomIn, ZoomOut, Trash2, Volume2, VolumeX, Undo2, Redo2, Copy, Clipboard, Scissors, Film } from './Icons';
+import { Plus, X, ImageIcon, GripHorizontal, ZoomIn, ZoomOut, Trash2, Volume2, VolumeX, Undo2, Redo2, Copy, Clipboard, Scissors, Film, Split } from './Icons';
 import { formatTime } from '../utils/parsers';
 
 interface VisualEditorProps {
@@ -154,6 +155,57 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
     setSlides(prev => [...prev, ...newSlides].sort((a, b) => a.startTime - b.startTime));
     setSelectedSlideIds(newSlides.map(s => s.id));
   }, [clipboard, currentTime, setSlides]);
+
+  const handleSplit = useCallback(() => {
+    if (selectedSlideIds.length === 0) return;
+
+    setSlides(prevSlides => {
+      const newSlides: VisualSlide[] = [];
+      const newSelection: string[] = [];
+      let hasChanges = false;
+
+      prevSlides.forEach(slide => {
+        if (selectedSlideIds.includes(slide.id)) {
+          // Check if split point is within slide (with small buffer)
+          if (currentTime > slide.startTime + 0.1 && currentTime < slide.endTime - 0.1) {
+            hasChanges = true;
+            const splitPoint = currentTime;
+            const originalDuration = slide.endTime - slide.startTime;
+            const firstPartDuration = splitPoint - slide.startTime;
+
+            const part1: VisualSlide = {
+              ...slide,
+              endTime: splitPoint
+            };
+
+            const part2: VisualSlide = {
+              ...slide,
+              id: Math.random().toString(36).substr(2, 9),
+              startTime: splitPoint,
+              endTime: slide.endTime,
+              // Calculate new media offset for continuity
+              mediaStartOffset: (slide.mediaStartOffset || 0) + firstPartDuration
+            };
+
+            newSlides.push(part1);
+            newSlides.push(part2);
+            newSelection.push(part2.id); // Select the second part after split
+          } else {
+            newSlides.push(slide);
+          }
+        } else {
+          newSlides.push(slide);
+        }
+      });
+
+      if (hasChanges) {
+        // Defer selection update slightly to ensure state sync
+        setTimeout(() => setSelectedSlideIds(newSelection), 0);
+        return newSlides.sort((a, b) => a.startTime - b.startTime);
+      }
+      return prevSlides;
+    });
+  }, [selectedSlideIds, currentTime, setSlides]);
 
   const [activeDrag, setActiveDrag] = useState<{
     id: string;
@@ -416,6 +468,12 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
     if ((e.ctrlKey || e.metaKey) && e.key === 'x') { e.preventDefault(); handleCut(); return; }
     if ((e.ctrlKey || e.metaKey) && e.key === 'v') { e.preventDefault(); handlePaste(); return; }
 
+    if (e.key.toLowerCase() === 'x' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        handleSplit();
+        return;
+    }
+
     if ((e.key === 'Delete' || e.key === 'Backspace') && selectedSlideIds.length > 0) {
       e.preventDefault();
       setSlides(prev => prev.filter(s => !selectedSlideIds.includes(s.id)));
@@ -499,7 +557,13 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
         } else if (prev.type === 'resize-start') {
           let newStart = getSnapTime(prev.initialStart + deltaSec, [prev.id]);
           newStart = Math.max(0, Math.min(newStart, prev.initialEnd - 0.5));
-          return currentSlides.map(s => s.id === prev.id ? { ...s, startTime: newStart } : s);
+          // Update mediaStartOffset when resizing from start (trimming start)
+          const offsetDelta = newStart - prev.initialStart;
+          return currentSlides.map(s => s.id === prev.id ? { 
+            ...s, 
+            startTime: newStart,
+            mediaStartOffset: Math.max(0, (s.mediaStartOffset || 0) + offsetDelta)
+          } : s);
         } else {
           let newEnd = getSnapTime(prev.initialEnd + deltaSec, [prev.id]);
           newEnd = Math.max(prev.initialStart + 0.5, newEnd);
@@ -554,6 +618,7 @@ const VisualEditor: React.FC<VisualEditorProps> = ({ slides, setSlides, currentT
           </div>
           <div className="w-px h-4 bg-zinc-700"></div>
           <div className="flex items-center gap-1">
+            <button onClick={handleSplit} disabled={selectedSlideIds.length === 0} className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white disabled:opacity-30" title="Split at Playhead (X)"><Split size={14} /></button>
             <button onClick={handleCopy} disabled={selectedSlideIds.length === 0} className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white disabled:opacity-30"><Copy size={14} /></button>
             <button onClick={handleCut} disabled={selectedSlideIds.length === 0} className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white disabled:opacity-30"><Scissors size={14} /></button>
             <button onClick={handlePaste} disabled={clipboard.length === 0} className="p-1 hover:bg-zinc-700 rounded text-zinc-400 hover:text-white disabled:opacity-30"><Clipboard size={14} /></button>
