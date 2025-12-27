@@ -116,7 +116,27 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             });
 
             const rawText = response.text || "[]";
-            const transcribedLyrics: LyricLine[] = JSON.parse(rawText);
+            let transcribedLyrics: LyricLine[] = JSON.parse(rawText);
+
+            // Sanitize timestamps to be within 0 and audio duration
+            const audioDuration = item.duration || 0;
+            if (audioDuration > 0) {
+                transcribedLyrics = transcribedLyrics
+                    .map(l => {
+                        // Clamp time to [0, duration]
+                        const safeTime = Math.max(0, Math.min(l.time, audioDuration));
+                        
+                        // Clamp endTime to [safeTime, duration]
+                        let safeEndTime = l.endTime;
+                        if (safeEndTime !== undefined) {
+                            safeEndTime = Math.max(safeTime, Math.min(safeEndTime, audioDuration));
+                        }
+                        
+                        return { ...l, time: safeTime, endTime: safeEndTime };
+                    })
+                    // Remove lines that start exactly at the end or later (invalid duration usually)
+                    .filter(l => l.time < audioDuration);
+            }
 
             setPlaylist(prev => prev.map(p => 
                 p.id === item.id ? { ...p, parsedLyrics: transcribedLyrics.sort((a, b) => a.time - b.time) } : p
@@ -149,16 +169,28 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         const rawLyrics = item.parsedLyrics || [];
         if (rawLyrics.length === 0) return;
 
+        const audioDuration = item.duration || Infinity;
         let content = "";
         const filename = `${item.metadata.title || 'lyrics'}.${format}`;
 
         if (format === 'txt') {
             content = rawLyrics.map(l => l.text).join("\n");
         } else if (format === 'json') {
-            content = JSON.stringify(rawLyrics, null, 2);
+            const sanitizedForJson = rawLyrics.map(l => ({
+                ...l,
+                time: Math.min(l.time, audioDuration),
+                endTime: l.endTime ? Math.min(l.endTime, audioDuration) : undefined
+            }));
+            content = JSON.stringify(sanitizedForJson, null, 2);
         } else if (format === 'srt') {
             content = rawLyrics.map((l, i) => {
-                const effectiveEnd = l.endTime || (rawLyrics[i + 1]?.time || l.time + 3);
+                const startTime = Math.min(Math.max(0, l.time), audioDuration);
+                // Calculate effective end: either provided endTime, or next line start, or +3s default
+                let effectiveEnd = l.endTime || (rawLyrics[i + 1]?.time || l.time + 3);
+                
+                // Clamp end time to duration and ensure it's >= start time
+                effectiveEnd = Math.max(startTime, Math.min(effectiveEnd, audioDuration));
+
                 const toTimestamp = (sec: number) => {
                     const hrs = Math.floor(sec / 3600).toString().padStart(2, '0');
                     const mins = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
@@ -166,13 +198,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     const ms = Math.floor((sec % 1) * 1000).toString().padStart(3, '0');
                     return `${hrs}:${mins}:${secs},${ms}`;
                 };
-                return `${i + 1}\n${toTimestamp(l.time)} --> ${toTimestamp(effectiveEnd)}\n${l.text}\n`;
+                return `${i + 1}\n${toTimestamp(startTime)} --> ${toTimestamp(effectiveEnd)}\n${l.text}\n`;
             }).join("\n");
         } else if (format === 'lrc') {
             const lrcLines: string[] = [];
             const formatLrcTime = (sec: number) => {
-                const mins = Math.floor(sec / 60).toString().padStart(2, '0');
-                const secs = (sec % 60).toFixed(2).padStart(5, '0');
+                const safeSec = Math.max(0, Math.min(sec, audioDuration));
+                const mins = Math.floor(safeSec / 60).toString().padStart(2, '0');
+                const secs = (safeSec % 60).toFixed(2).padStart(5, '0');
                 return `[${mins}:${secs}]`;
             };
 
@@ -180,23 +213,26 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 const current = rawLyrics[i];
                 const next = rawLyrics[i + 1];
                 
-                // Add current lyric
+                // Add current lyric (clamped time is handled in formatLrcTime)
                 lrcLines.push(`${formatLrcTime(current.time)}${current.text}`);
                 
                 // Effective end time of current line
-                const currentEnd = current.endTime || current.time + 2;
+                let currentEnd = current.endTime || current.time + 2;
+                currentEnd = Math.min(currentEnd, audioDuration);
 
                 if (next) {
                     // If gap between current vocal end and next vocal start > 4s, clear screen
-                    if (next.time - currentEnd > 4) {
+                    // Ensure we don't insert a clear tag past the audio duration
+                    if (next.time - currentEnd > 4 && currentEnd < audioDuration) {
                         lrcLines.push(`${formatLrcTime(currentEnd)}`);
                     }
                 } else {
                     // Last line special logic
-                    const audioDuration = item.duration || 0;
                     // If audio still has > 4s after last vocal end, clear screen after 4s (per user example)
-                    if (audioDuration > 0 && (audioDuration - currentEnd > 4)) {
-                        lrcLines.push(`${formatLrcTime(currentEnd + 4)}`);
+                    // But strictly cap at duration
+                    if (item.duration && (item.duration - currentEnd > 4)) {
+                        const clearTime = Math.min(currentEnd + 4, item.duration);
+                        lrcLines.push(`${formatLrcTime(clearTime)}`);
                     }
                 }
             }
