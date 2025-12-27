@@ -1,3 +1,4 @@
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
@@ -7,8 +8,17 @@ export default {
     "./utils/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      animation: {
+        'slide-up': 'slideUp 0.3s ease-out',
+      },
+      keyframes: {
+        slideUp: {
+          'from': { transform: 'translateY(100%)' },
+          'to': { transform: 'translateY(0)' },
+        }
+      }
+    },
   },
   plugins: [],
 }
-

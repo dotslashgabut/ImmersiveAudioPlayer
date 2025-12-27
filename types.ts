@@ -1,4 +1,3 @@
-
 export interface LyricLine {
   time: number; // in seconds
   text: string;
@@ -94,3 +93,11 @@ export interface RenderConfig {
   introText: string;
   textCase: 'none' | 'upper' | 'lower' | 'title' | 'sentence' | 'invert';
 }
+
+export interface SubtitleSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+export type GeminiModel = 'gemini-3-flash-preview' | 'gemini-2.5-flash';
