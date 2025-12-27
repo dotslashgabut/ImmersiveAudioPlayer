@@ -228,15 +228,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     };
 
     const handleClearLyrics = (item: PlaylistItem) => {
-        if (window.confirm(`Are you sure you want to delete the lyrics for "${item.metadata.title}"?`)) {
-            setPlaylist(prev => prev.map(p => 
-                p.id === item.id ? { ...p, parsedLyrics: [], lyricFile: undefined } : p
-            ));
+        // Direct unload without confirmation
+        setPlaylist(prev => prev.map(p => 
+            p.id === item.id ? { ...p, parsedLyrics: [], lyricFile: undefined } : p
+        ));
 
-            // Sync with current player if this is the active track
-            if (playlist[currentTrackIndex]?.id === item.id) {
-                setLyrics([]);
-            }
+        // Sync with current player if this is the active track
+        if (playlist[currentTrackIndex]?.id === item.id) {
+            setLyrics([]);
         }
     };
 
@@ -249,8 +248,8 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         const file = e.target.files?.[0];
         const targetId = uploadTargetIdRef.current;
 
-        if (file && targetId) {
-            try {
+        try {
+            if (file && targetId) {
                 const text = await file.text();
                 const ext = file.name.split('.').pop()?.toLowerCase();
                 let parsedLyrics: LyricLine[] = [];
@@ -266,15 +265,15 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 if (playlist[currentTrackIndex]?.id === targetId) {
                     setLyrics(parsedLyrics);
                 }
-
-            } catch (err) {
-                console.error("Failed to parse manual lyrics:", err);
-                alert("Failed to load lyric file.");
             }
+        } catch (err) {
+            console.error("Failed to parse manual lyrics:", err);
+            alert("Failed to load lyric file.");
+        } finally {
+            // Always reset input to allow re-uploading the same file if needed
+            if (lyricInputRef.current) lyricInputRef.current.value = '';
+            uploadTargetIdRef.current = null;
         }
-        // Reset
-        if (lyricInputRef.current) lyricInputRef.current.value = '';
-        uploadTargetIdRef.current = null;
     };
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -534,7 +533,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                             <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'srt'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download SRT">SRT</button>
                                             <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'json'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download JSON">JSON</button>
                                             <div className="w-px h-3 bg-zinc-700 mx-0.5"></div>
-                                            <button onClick={(e) => { e.stopPropagation(); handleClearLyrics(item); }} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-400 rounded transition-colors" title="Delete Lyrics">
+                                            <button onClick={(e) => { e.stopPropagation(); handleClearLyrics(item); }} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-400 rounded transition-colors" title="Unload Lyrics">
                                                 <Trash2 size={10} />
                                             </button>
                                         </div>
