@@ -24,6 +24,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const lyricInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetIdRef = useRef<string | null>(null);
     const abortControllers = useRef<Map<string, AbortController>>(new Map());
+    
+    // Ref to track the currently playing ID continuously, avoiding stale closures in async functions
+    const currentTrackIdRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const id = playlist[currentTrackIndex]?.id;
+        currentTrackIdRef.current = id || null;
+    }, [playlist, currentTrackIndex]);
 
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
@@ -88,7 +96,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const handleTranscribe = async (item: PlaylistItem) => {
         if (transcribingIds.has(item.id)) return;
 
-        // Stop playback as requested when transcription starts
+        // Stop playback as requested when transcription starts to prevent audio/performance conflicts
         onStop();
 
         const controller = new AbortController();
@@ -118,7 +126,9 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 p.id === item.id ? { ...p, parsedLyrics: sortedLyrics } : p
             ));
 
-            if (playlist[currentTrackIndex]?.id === item.id) {
+            // CRITICAL FIX: Use the ref to check if the transcribed item is STILL the current one.
+            // This prevents stale state issues if the user switched tracks during generation.
+            if (currentTrackIdRef.current === item.id) {
                 setLyrics(sortedLyrics);
             }
 
@@ -195,7 +205,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             p.id === item.id ? { ...p, parsedLyrics: [], lyricFile: undefined } : p
         ));
 
-        if (playlist[currentTrackIndex]?.id === item.id) {
+        if (currentTrackIdRef.current === item.id) {
             setLyrics([]);
         }
     };
@@ -222,7 +232,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     p.id === targetId ? { ...p, parsedLyrics, lyricFile: file } : p
                 ));
 
-                if (playlist[currentTrackIndex]?.id === targetId) {
+                if (currentTrackIdRef.current === targetId) {
                     setLyrics(parsedLyrics);
                 }
             }
