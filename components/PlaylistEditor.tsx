@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { PlaylistItem, LyricLine } from '../types';
-import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown, ChevronDown, Upload } from './Icons';
+import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown, ChevronDown, Upload, Square } from './Icons';
 import { formatTime, parseLRC, parseSRT } from '../utils/parsers';
 import { transcribeAudio } from '../services/geminiService';
 
@@ -21,6 +21,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const containerRef = useRef<HTMLDivElement>(null);
     const lyricInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetIdRef = useRef<string | null>(null);
+    const abortControllers = useRef<Map<string, AbortController>>(new Map());
 
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
@@ -89,11 +90,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
 
     const handleTranscribe = async (item: PlaylistItem) => {
         if (transcribingIds.has(item.id)) return;
+        
+        const controller = new AbortController();
+        abortControllers.current.set(item.id, controller);
         setTranscribingIds(prev => new Set(prev).add(item.id));
 
         try {
             // Use the service to get raw transcribed lines
-            let transcribedLyrics = await transcribeAudio(item.audioFile, selectedModel);
+            let transcribedLyrics = await transcribeAudio(item.audioFile, selectedModel, controller.signal);
 
             // Sanitize timestamps to be within 0 and audio duration
             const audioDuration = item.duration || 0;
@@ -126,16 +130,34 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 setLyrics(sortedLyrics);
             }
 
-        } catch (err) {
-            console.error("Transcription failed:", err);
-            alert("Transcription failed. Please check your API key or file format.");
+        } catch (err: any) {
+            if (err.message === "Aborted") {
+                console.log(`Transcription for ${item.id} aborted.`);
+            } else {
+                console.error("Transcription failed:", err);
+                alert("Transcription failed. Please check your API key or file format.");
+            }
         } finally {
             setTranscribingIds(prev => {
                 const next = new Set(prev);
                 next.delete(item.id);
                 return next;
             });
+            abortControllers.current.delete(item.id);
         }
+    };
+
+    const handleStopTranscription = (id: string) => {
+        const controller = abortControllers.current.get(id);
+        if (controller) {
+            controller.abort();
+            abortControllers.current.delete(id);
+        }
+        setTranscribingIds(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+        });
     };
 
     const downloadFile = (content: string, filename: string, mimeType: string) => {
@@ -519,11 +541,25 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                     </button>
 
                                     <button 
-                                        onClick={(e) => { e.stopPropagation(); handleTranscribe(item); }}
-                                        className={`p-1.5 rounded bg-purple-900/30 border border-purple-500/30 text-purple-400 hover:bg-purple-800/50 transition-colors ${isTranscribing ? 'animate-pulse pointer-events-none' : ''}`}
-                                        title={`AI Sync Transcribe using ${selectedModel === 'gemini-3-flash-preview' ? 'v3' : 'v2.5'}`}
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            if (isTranscribing) {
+                                                handleStopTranscription(item.id);
+                                            } else {
+                                                handleTranscribe(item); 
+                                            }
+                                        }}
+                                        className={`p-1.5 rounded transition-colors ${isTranscribing ? 'bg-red-900/30 border-red-500/30 text-red-400 hover:bg-red-900/50' : 'bg-purple-900/30 border-purple-500/30 text-purple-400 hover:bg-purple-800/50'} border`}
+                                        title={isTranscribing ? "Cancel Transcription" : `AI Sync Transcribe using ${selectedModel === 'gemini-3-flash-preview' ? 'v3' : 'v2.5'}`}
                                     >
-                                        {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                                        {isTranscribing ? (
+                                            <div className="group/btn relative flex items-center justify-center w-3.5 h-3.5">
+                                                <Loader2 size={14} className="absolute animate-spin opacity-100 group-hover/btn:opacity-0 transition-opacity" />
+                                                <Square size={10} fill="currentColor" className="absolute opacity-0 group-hover/btn:opacity-100 transition-opacity" />
+                                            </div>
+                                        ) : (
+                                            <Sparkles size={14} />
+                                        )}
                                     </button>
                                     
                                     {lyrics.length > 0 && (

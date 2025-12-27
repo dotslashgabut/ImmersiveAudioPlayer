@@ -30,13 +30,19 @@ const parseTimestamp = (ts: string | number): number => {
 
 export const transcribeAudio = async (
   audioFile: File,
-  modelName: string
+  modelName: string,
+  signal?: AbortSignal
 ): Promise<LyricLine[]> => {
   if (!process.env.API_KEY) {
     throw new Error("API Key is missing. Please check your environment configuration.");
   }
 
+  if (signal?.aborted) throw new Error("Aborted");
+
   const base64Data = await fileToBase64(audioFile);
+  
+  if (signal?.aborted) throw new Error("Aborted");
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Stricter prompt to ensure precision, adapted from sample_geminiService.ts
@@ -59,7 +65,7 @@ export const transcribeAudio = async (
   `;
 
   try {
-    const response = await ai.models.generateContent({
+    const responsePromise = ai.models.generateContent({
       model: modelName,
       contents: {
         parts: [
@@ -91,6 +97,17 @@ export const transcribeAudio = async (
       },
     });
 
+    const response = await Promise.race([
+        responsePromise,
+        new Promise<never>((_, reject) => {
+            if (signal) {
+                signal.onabort = () => reject(new Error("Aborted"));
+            }
+        })
+    ]);
+
+    if (signal?.aborted) throw new Error("Aborted");
+
     let jsonText = response.text || "[]";
     // Clean up potential markdown formatting
     jsonText = jsonText.replace(/```json|```/g, "").trim();
@@ -106,7 +123,10 @@ export const transcribeAudio = async (
       text: seg.text || ""
     }));
 
-  } catch (error) {
+  } catch (error: any) {
+    if (signal?.aborted || error.message === "Aborted") {
+        throw new Error("Aborted");
+    }
     console.error("Transcription error:", error);
     throw error;
   }
