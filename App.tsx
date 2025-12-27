@@ -1792,6 +1792,7 @@ function App() {
                 setMetadata({ title: 'No Audio Loaded', artist: 'Select a file', coverUrl: null, backgroundType: 'image' });
               }}
               onClose={() => setIsPlaylistMode(false)}
+              setLyrics={setLyrics}
             />
           </div>
         ) : (

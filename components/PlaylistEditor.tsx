@@ -1,9 +1,8 @@
 import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { PlaylistItem, LyricLine } from '../types';
-import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown, ChevronDown } from './Icons';
+import { Plus, Trash2, Play, Volume2, FileText, ListMusic, Shuffle, User, Disc, Music, X, Sparkles, Loader2, FileJson, FileType, FileDown, ChevronDown, Upload } from './Icons';
 import { formatTime, parseLRC, parseSRT } from '../utils/parsers';
-// Use correct import for GoogleGenAI and Type
-import { GoogleGenAI, Type } from "@google/genai";
+import { transcribeAudio } from '../services/geminiService';
 
 interface PlaylistEditorProps {
     playlist: PlaylistItem[];
@@ -15,14 +14,48 @@ interface PlaylistEditorProps {
     onClearPlaylist: () => void;
     currentTime: number;
     onClose: () => void;
+    setLyrics: React.Dispatch<React.SetStateAction<LyricLine[]>>;
 }
 
-const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, currentTrackIndex, setCurrentTrackIndex, onPlayTrack, onSeek, onClearPlaylist, currentTime, onClose }) => {
+const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, currentTrackIndex, setCurrentTrackIndex, onPlayTrack, onSeek, onClearPlaylist, currentTime, onClose, setLyrics }) => {
     const containerRef = useRef<HTMLDivElement>(null);
+    const lyricInputRef = useRef<HTMLInputElement>(null);
+    const uploadTargetIdRef = useRef<string | null>(null);
+
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [sortConfig, setSortConfig] = useState<{ key: string | null; direction: 'asc' | 'desc' }>({ key: null, direction: 'asc' });
     const [transcribingIds, setTranscribingIds] = useState<Set<string>>(new Set());
     const [selectedModel, setSelectedModel] = useState<'gemini-3-flash-preview' | 'gemini-2.5-flash'>('gemini-2.5-flash');
+
+    // Auto-scroll logic for lyrics
+    useEffect(() => {
+        if (currentTrackIndex === -1) return;
+
+        const activeId = `lyric-active-${currentTrackIndex}`;
+        const activeEl = document.getElementById(activeId);
+
+        if (activeEl) {
+            // Find the scrolling container (ancestor with overflow-x-auto)
+            // In the JSX structure: ScrollDiv -> InnerWrapper -> LyricDiv
+            const scrollContainer = activeEl.closest('.overflow-x-auto') as HTMLDivElement;
+            
+            if (scrollContainer) {
+                const containerWidth = scrollContainer.clientWidth;
+                const elLeft = activeEl.offsetLeft;
+                const elWidth = activeEl.clientWidth;
+
+                // Calculate center position
+                // We want the center of the element to align with the center of the container
+                // ScrollLeft = (ElementLeft + ElementWidth/2) - (ContainerWidth/2)
+                const targetScrollLeft = elLeft + (elWidth / 2) - (containerWidth / 2);
+
+                scrollContainer.scrollTo({
+                    left: targetScrollLeft,
+                    behavior: 'smooth'
+                });
+            }
+        }
+    }, [currentTime, currentTrackIndex]);
 
     const handleSort = (type: 'filename' | 'artist' | 'title' | 'album' | 'random') => {
         if (playlist.length === 0) return;
@@ -54,69 +87,13 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         }
     };
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => {
-                const base64String = (reader.result as string).split(',')[1];
-                resolve(base64String);
-            };
-            reader.onerror = error => reject(error);
-        });
-    };
-
     const handleTranscribe = async (item: PlaylistItem) => {
         if (transcribingIds.has(item.id)) return;
         setTranscribingIds(prev => new Set(prev).add(item.id));
 
         try {
-            const base64Data = await fileToBase64(item.audioFile);
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const response = await ai.models.generateContent({
-                model: selectedModel,
-                contents: {
-                    parts: [
-                        {
-                            inlineData: {
-                                mimeType: item.audioFile.type,
-                                data: base64Data,
-                            },
-                        },
-                        {
-                            text: "Transcribe this audio into high-precision synchronized lyrics. Return a JSON array of objects. Each object MUST have 'time' (start in seconds), 'endTime' (end of vocal in seconds), and 'text' (the lyrics). Do not include your own blank lines in the JSON; the export logic will handle clearing based on endTime gaps."
-                        }
-                    ]
-                },
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                time: {
-                                    type: Type.NUMBER,
-                                    description: 'Start time in seconds.',
-                                },
-                                endTime: {
-                                    type: Type.NUMBER,
-                                    description: 'End time when vocal stops in seconds.',
-                                },
-                                text: {
-                                    type: Type.STRING,
-                                    description: 'Lyric text.',
-                                },
-                            },
-                            required: ["time", "endTime", "text"],
-                        },
-                    },
-                },
-            });
-
-            const rawText = response.text || "[]";
-            let transcribedLyrics: LyricLine[] = JSON.parse(rawText);
+            // Use the service to get raw transcribed lines
+            let transcribedLyrics = await transcribeAudio(item.audioFile, selectedModel);
 
             // Sanitize timestamps to be within 0 and audio duration
             const audioDuration = item.duration || 0;
@@ -138,9 +115,17 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     .filter(l => l.time < audioDuration);
             }
 
+            const sortedLyrics = transcribedLyrics.sort((a, b) => a.time - b.time);
+
             setPlaylist(prev => prev.map(p => 
-                p.id === item.id ? { ...p, parsedLyrics: transcribedLyrics.sort((a, b) => a.time - b.time) } : p
+                p.id === item.id ? { ...p, parsedLyrics: sortedLyrics } : p
             ));
+
+            // Sync with current player if this is the active track
+            if (playlist[currentTrackIndex]?.id === item.id) {
+                setLyrics(sortedLyrics);
+            }
+
         } catch (err) {
             console.error("Transcription failed:", err);
             alert("Transcription failed. Please check your API key or file format.");
@@ -240,6 +225,56 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         }
 
         downloadFile(content, filename, 'application/octet-stream');
+    };
+
+    const handleClearLyrics = (item: PlaylistItem) => {
+        if (window.confirm(`Are you sure you want to delete the lyrics for "${item.metadata.title}"?`)) {
+            setPlaylist(prev => prev.map(p => 
+                p.id === item.id ? { ...p, parsedLyrics: [], lyricFile: undefined } : p
+            ));
+
+            // Sync with current player if this is the active track
+            if (playlist[currentTrackIndex]?.id === item.id) {
+                setLyrics([]);
+            }
+        }
+    };
+
+    const triggerManualUpload = (id: string) => {
+        uploadTargetIdRef.current = id;
+        lyricInputRef.current?.click();
+    };
+
+    const handleManualLyricUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        const targetId = uploadTargetIdRef.current;
+
+        if (file && targetId) {
+            try {
+                const text = await file.text();
+                const ext = file.name.split('.').pop()?.toLowerCase();
+                let parsedLyrics: LyricLine[] = [];
+
+                if (ext === 'lrc') parsedLyrics = parseLRC(text);
+                else if (ext === 'srt') parsedLyrics = parseSRT(text);
+
+                setPlaylist(prev => prev.map(p => 
+                    p.id === targetId ? { ...p, parsedLyrics, lyricFile: file } : p
+                ));
+
+                // Sync with current player if this is the active track
+                if (playlist[currentTrackIndex]?.id === targetId) {
+                    setLyrics(parsedLyrics);
+                }
+
+            } catch (err) {
+                console.error("Failed to parse manual lyrics:", err);
+                alert("Failed to load lyric file.");
+            }
+        }
+        // Reset
+        if (lyricInputRef.current) lyricInputRef.current.value = '';
+        uploadTargetIdRef.current = null;
     };
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -368,6 +403,15 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
 
     return (
         <div className="w-full max-w-[100vw] h-64 flex flex-col bg-zinc-900/95 backdrop-blur-md border-t border-white/10 z-20 shadow-xl overflow-hidden outline-none">
+            {/* Hidden Input for Manual Lyric Upload */}
+            <input 
+                type="file" 
+                ref={lyricInputRef} 
+                className="hidden" 
+                accept=".lrc,.srt" 
+                onChange={handleManualLyricUpload} 
+            />
+
             <div className="p-2 border-b border-white/10 flex items-center justify-between bg-zinc-900 z-30 shrink-0 h-12">
                 <div className="flex items-center gap-4 shrink-0">
                     <h2 className="text-sm font-bold flex items-center gap-2 text-zinc-300 whitespace-nowrap">
@@ -468,6 +512,14 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                 
                                 <div className="flex items-center gap-1 shrink-0 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                     <button 
+                                        onClick={(e) => { e.stopPropagation(); triggerManualUpload(item.id); }}
+                                        className="p-1.5 rounded bg-zinc-800/80 border border-white/5 text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+                                        title="Load Lyric File (.lrc, .srt)"
+                                    >
+                                        <Upload size={14} />
+                                    </button>
+
+                                    <button 
                                         onClick={(e) => { e.stopPropagation(); handleTranscribe(item); }}
                                         className={`p-1.5 rounded bg-purple-900/30 border border-purple-500/30 text-purple-400 hover:bg-purple-800/50 transition-colors ${isTranscribing ? 'animate-pulse pointer-events-none' : ''}`}
                                         title={`AI Sync Transcribe using ${selectedModel === 'gemini-3-flash-preview' ? 'v3' : 'v2.5'}`}
@@ -481,6 +533,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                                             <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'lrc'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download LRC">LRC</button>
                                             <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'srt'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download SRT">SRT</button>
                                             <button onClick={(e) => { e.stopPropagation(); exportLyrics(item, 'json'); }} className="p-1 hover:bg-white/10 rounded text-[8px] text-zinc-400 font-bold" title="Download JSON">JSON</button>
+                                            <div className="w-px h-3 bg-zinc-700 mx-0.5"></div>
+                                            <button onClick={(e) => { e.stopPropagation(); handleClearLyrics(item); }} className="p-1 hover:bg-red-900/50 text-zinc-500 hover:text-red-400 rounded transition-colors" title="Delete Lyrics">
+                                                <Trash2 size={10} />
+                                            </button>
                                         </div>
                                     )}
 
