@@ -45,28 +45,22 @@ export const transcribeAudio = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Stricter prompt to ensure precision and prevent deduplication of repeated lines
+  // Extremely strict prompt to prevent summarization and ensure synchronization
   const prompt = `
-    Act as a professional audio transcriber and lyric synchronizer. 
-    Analyze the provided audio and generate highly accurate subtitles/lyrics.
+    You are a professional audio transcriber specializing in lyric synchronization. 
+    Your goal is to generate a strictly synchronized, line-by-line transcript of the song.
 
-    TIMESTAMP PRECISION RULES:
-    1. **FORMAT**: Timestamps MUST be strings in "MM:SS.mmm" format (e.g., "00:04.250").
-    2. **SYNC**: The "start" timestamp must align exactly with the very first audible syllable or sound of the phrase.
-    3. **DURATION**: The "end" timestamp must mark exactly when the phrase or vocal line concludes.
-    4. **CONSISTENCY**: Timestamps must be absolute and strictly chronological.
+    CRITICAL RULES - READ CAREFULLY:
+    1. **NO SUMMARIZATION**: You MUST transcribe EVERY single line. Do not skip repeated choruses, hooks, or background vocals.
+    2. **VERBATIM**: If a line is repeated 5 times, output 5 separate JSON entries with the exact time each one is sung.
+    3. **SEGMENTATION**: Break text into natural lyric lines (e.g., "Hello / how are you" -> 2 lines if sung with a pause).
+    4. **TIMESTAMPS**: 
+       - "start": The exact moment the first syllable is audible.
+       - "end": The exact moment the line ends or silence begins.
+       - Format MUST be "MM:SS.mmm" (e.g. "03:05.123").
+    5. **COMPLETENESS**: Verify that the transcript covers the entire duration of the audio provided.
 
-    TRANSCRIPTION RULES:
-    1. **VERBATIM**: Transcribe exactly what is heard.
-    2. **REPETITION**: Do NOT skip repeated lines, choruses, or background vocals. If a line is sung multiple times, include it each time with its specific timestamp. DO NOT deduplicate text.
-    3. **COMPLETENESS**: Ensure every vocal phrase is captured. Do not summarize.
-
-    BEHAVIOR:
-    - If it's a song, capture lyrics.
-    - If it's speech, capture the spoken words.
-    - Ensure no overlapping segments.
-    
-    OUTPUT: Return a JSON array of objects with keys: "start", "end", "text".
+    Output strictly a JSON array of objects.
   `;
 
   try {
@@ -84,17 +78,18 @@ export const transcribeAudio = async (
         ]
       },
       config: {
-        // Thinking budget helps models reason about the timeline correctly (supported on 2.5 and 3)
-        thinkingConfig: { thinkingBudget: 4096 },
+        // Disable thinking for transcription to prevent the model from "reasoning" about the song structure 
+        // and summarizing repeated parts. We want raw, mechanical transcription.
+        thinkingConfig: { thinkingBudget: 0 },
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              start: { type: Type.STRING, description: "Start time 'MM:SS.mmm'" },
-              end: { type: Type.STRING, description: "End time 'MM:SS.mmm'" },
-              text: { type: Type.STRING, description: "The content text" }
+              start: { type: Type.STRING, description: "Start time in 'MM:SS.mmm' format" },
+              end: { type: Type.STRING, description: "End time in 'MM:SS.mmm' format" },
+              text: { type: Type.STRING, description: "The literal text sung at this timestamp" }
             },
             required: ["start", "end", "text"]
           },
@@ -114,7 +109,7 @@ export const transcribeAudio = async (
     if (signal?.aborted) throw new Error("Aborted");
 
     let jsonText = response.text || "[]";
-    // Clean up potential markdown formatting
+    // Clean up potential markdown formatting if the model ignores responseMimeType (rare but possible)
     jsonText = jsonText.replace(/```json|```/g, "").trim();
 
     if (!jsonText) return [];
