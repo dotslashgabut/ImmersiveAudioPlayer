@@ -1725,7 +1725,7 @@ function App() {
                     <select
                       value={renderCodec}
                       onChange={(e) => setRenderCodec(e.target.value)}
-                      className="appearance-none bg-zinc-800/50 border border-white/5 text-zinc-300 text-xs rounded-lg px-3 pr-8 w-32 h-9 focus:outline-none focus:border-purple-500 cursor-pointer"
+                      className="appearance-none bg-zinc-800/50 border border-white/10 rounded-lg px-3 pr-8 w-32 h-9 focus:outline-none focus:border-purple-500 cursor-pointer"
                       disabled={isRendering}
                       title="Select Video Codec"
                     >
@@ -1778,6 +1778,7 @@ function App() {
               setCurrentTrackIndex={setCurrentTrackIndex}
               onPlayTrack={playTrack}
               currentTime={currentTime}
+              onStop={stopPlayback}
               onSeek={(time) => {
                 if (audioRef.current && !isRendering) {
                   audioRef.current.currentTime = time;

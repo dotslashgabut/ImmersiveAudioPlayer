@@ -12,13 +12,14 @@ interface PlaylistEditorProps {
     setCurrentTrackIndex: React.Dispatch<React.SetStateAction<number>>;
     onPlayTrack: (index: number) => void;
     onSeek: (time: number) => void;
+    onStop: () => void;
     onClearPlaylist: () => void;
     currentTime: number;
     onClose: () => void;
     setLyrics: React.Dispatch<React.SetStateAction<LyricLine[]>>;
 }
 
-const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, currentTrackIndex, setCurrentTrackIndex, onPlayTrack, onSeek, onClearPlaylist, currentTime, onClose, setLyrics }) => {
+const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, currentTrackIndex, setCurrentTrackIndex, onPlayTrack, onSeek, onStop, onClearPlaylist, currentTime, onClose, setLyrics }) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const lyricInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetIdRef = useRef<string | null>(null);
@@ -37,8 +38,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
         const activeEl = document.getElementById(activeId);
 
         if (activeEl) {
-            // Find the scrolling container (ancestor with overflow-x-auto)
-            // In the JSX structure: ScrollDiv -> InnerWrapper -> LyricDiv
             const scrollContainer = activeEl.closest('.overflow-x-auto') as HTMLDivElement;
 
             if (scrollContainer) {
@@ -46,9 +45,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 const elLeft = activeEl.offsetLeft;
                 const elWidth = activeEl.clientWidth;
 
-                // Calculate center position
-                // We want the center of the element to align with the center of the container
-                // ScrollLeft = (ElementLeft + ElementWidth/2) - (ContainerWidth/2)
                 const targetScrollLeft = elLeft + (elWidth / 2) - (containerWidth / 2);
 
                 scrollContainer.scrollTo({
@@ -92,31 +88,27 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const handleTranscribe = async (item: PlaylistItem) => {
         if (transcribingIds.has(item.id)) return;
 
+        // Stop playback as requested when transcription starts
+        onStop();
+
         const controller = new AbortController();
         abortControllers.current.set(item.id, controller);
         setTranscribingIds(prev => new Set(prev).add(item.id));
 
         try {
-            // Use the service to get raw transcribed lines
             let transcribedLyrics = await transcribeAudio(item.audioFile, selectedModel, controller.signal);
 
-            // Sanitize timestamps to be within 0 and audio duration
             const audioDuration = item.duration || 0;
             if (audioDuration > 0) {
                 transcribedLyrics = transcribedLyrics
                     .map(l => {
-                        // Clamp time to [0, duration]
                         const safeTime = Math.max(0, Math.min(l.time, audioDuration));
-
-                        // Clamp endTime to [safeTime, duration]
                         let safeEndTime = l.endTime;
                         if (safeEndTime !== undefined) {
                             safeEndTime = Math.max(safeTime, Math.min(safeEndTime, audioDuration));
                         }
-
                         return { ...l, time: safeTime, endTime: safeEndTime };
                     })
-                    // Remove lines that start exactly at the end or later (invalid duration usually)
                     .filter(l => l.time < audioDuration);
             }
 
@@ -126,7 +118,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                 p.id === item.id ? { ...p, parsedLyrics: sortedLyrics } : p
             ));
 
-            // Sync with current player if this is the active track
             if (playlist[currentTrackIndex]?.id === item.id) {
                 setLyrics(sortedLyrics);
             }
@@ -200,12 +191,10 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     };
 
     const handleClearLyrics = (item: PlaylistItem) => {
-        // Direct unload without confirmation
         setPlaylist(prev => prev.map(p =>
             p.id === item.id ? { ...p, parsedLyrics: [], lyricFile: undefined } : p
         ));
 
-        // Sync with current player if this is the active track
         if (playlist[currentTrackIndex]?.id === item.id) {
             setLyrics([]);
         }
@@ -233,7 +222,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                     p.id === targetId ? { ...p, parsedLyrics, lyricFile: file } : p
                 ));
 
-                // Sync with current player if this is the active track
                 if (playlist[currentTrackIndex]?.id === targetId) {
                     setLyrics(parsedLyrics);
                 }
@@ -242,7 +230,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
             console.error("Failed to parse manual lyrics:", err);
             alert("Failed to load lyric file.");
         } finally {
-            // Always reset input to allow re-uploading the same file if needed
             if (lyricInputRef.current) lyricInputRef.current.value = '';
             uploadTargetIdRef.current = null;
         }
@@ -374,7 +361,6 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
 
     return (
         <div className="w-full max-w-[100vw] h-64 flex flex-col bg-zinc-900/95 backdrop-blur-md border-t border-white/10 z-20 shadow-xl overflow-hidden outline-none">
-            {/* Hidden Input for Manual Lyric Upload */}
             <input
                 type="file"
                 ref={lyricInputRef}
@@ -415,7 +401,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
                             title="Select AI Model for Transcription"
                         >
                             <option value="gemini-2.5-flash" className="bg-zinc-900 text-xs">Gemini 2.5 Flash</option>
-                            <option value="gemini-3-flash-preview" className="bg-zinc-900 text-xs">Gemini 3 Flash</option>
+                            <option value="gemini-3-flash-preview" className="bg-zinc-900 text-xs">Gemini 3 Flash Preview</option>
                         </select>
                         <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-zinc-500">
                             <ChevronDown size={10} />
