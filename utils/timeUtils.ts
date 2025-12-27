@@ -1,12 +1,49 @@
 
-import { SubtitleSegment } from '../types';
+import { LyricLine } from '../types';
 
 // Helper to pad numbers with leading zeros
 const pad = (num: number, size: number): string => {
     return num.toString().padStart(size, '0');
 };
 
-// Format: HH:MM:SS,mmm (SRT Standard)
+/**
+ * Robust timestamp parser handling numbers (seconds) or strings (MM:SS.mmm, HH:MM:SS.mmm)
+ * Examples: "04:20.500", "00:04:20,500", 260.5
+ */
+export const parseTimestamp = (ts: unknown): number => {
+    if (typeof ts === 'number') return ts;
+    if (!ts || typeof ts !== 'string') return 0;
+
+    // Replace comma with dot to ensure parseFloat handles milliseconds correctly
+    const cleanTs = ts.trim().replace(',', '.');
+    const parts = cleanTs.split(':');
+
+    try {
+        if (parts.length === 2) {
+            // Format MM:SS.mmm
+            const minutes = parseFloat(parts[0]);
+            const seconds = parseFloat(parts[1]);
+            return (minutes * 60) + seconds;
+        } else if (parts.length === 3) {
+            // Format HH:MM:SS.mmm
+            const hours = parseFloat(parts[0]);
+            const minutes = parseFloat(parts[1]);
+            const seconds = parseFloat(parts[2]);
+            return (hours * 3600) + (minutes * 60) + seconds;
+        } else {
+            // Raw seconds or fallback
+            const val = parseFloat(cleanTs);
+            return isNaN(val) ? 0 : val;
+        }
+    } catch (e) {
+        console.warn("Could not parse timestamp:", ts);
+        return 0;
+    }
+};
+
+/**
+ * Format seconds to SRT timestamp: HH:MM:SS,mmm
+ */
 export const formatToSRTTime = (seconds: number): string => {
     if (isNaN(seconds) || seconds < 0) return "00:00:00,000";
 
@@ -21,7 +58,9 @@ export const formatToSRTTime = (seconds: number): string => {
     return `${pad(hour, 2)}:${pad(min, 2)}:${pad(sec, 2)},${pad(ms, 3)}`;
 };
 
-// Format: [MM:SS.xx] (LRC Standard - centiseconds)
+/**
+ * Format seconds to LRC timestamp: [MM:SS.xx] (centiseconds)
+ */
 export const formatToLRCTime = (seconds: number): string => {
     if (isNaN(seconds) || seconds < 0) return "[00:00.00]";
 
@@ -34,7 +73,9 @@ export const formatToLRCTime = (seconds: number): string => {
     return `[${pad(min, 2)}:${pad(sec, 2)}.${pad(centis, 2)}]`;
 };
 
-// Format: MM:SS.mmm (For UI Display)
+/**
+ * Format seconds to Display timestamp: MM:SS.mmm
+ */
 export const formatToDisplayTime = (seconds: number): string => {
     if (isNaN(seconds) || seconds < 0) return "00:00.000";
 
@@ -47,19 +88,25 @@ export const formatToDisplayTime = (seconds: number): string => {
     return `${pad(min, 2)}:${pad(sec, 2)}.${pad(ms, 3)}`;
 };
 
-export const generateSRT = (segments: SubtitleSegment[]): string => {
-    return segments.map((seg, index) => {
-        return `${index + 1}\n${formatToSRTTime(seg.start)} --> ${formatToSRTTime(seg.end)}\n${seg.text}\n`;
-    }).join('\n');
+export const generateSRT = (lyrics: LyricLine[], audioDuration: number = Infinity): string => {
+    return lyrics.map((l, i) => {
+        const startTime = Math.min(Math.max(0, l.time), audioDuration);
+        // Calculate effective end: either provided endTime, or next line start, or +3s default
+        let effectiveEnd = l.endTime || (lyrics[i + 1]?.time || l.time + 3);
+
+        // Clamp end time to duration and ensure it's >= start time
+        effectiveEnd = Math.max(startTime, Math.min(effectiveEnd, audioDuration));
+
+        return `${i + 1}\n${formatToSRTTime(startTime)} --> ${formatToSRTTime(effectiveEnd)}\n${l.text}\n`;
+    }).join("\n");
 };
 
 export const generateLRC = (
-    segments: SubtitleSegment[],
+    lyrics: LyricLine[],
     metadata: {
         title?: string;
         artist?: string;
         album?: string;
-        by?: string;
     },
     audioDuration: number = 0
 ): string => {
@@ -68,35 +115,35 @@ export const generateLRC = (
     if (metadata.title) lines.push(`[ti:${metadata.title}]`);
     if (metadata.artist) lines.push(`[ar:${metadata.artist}]`);
     if (metadata.album) lines.push(`[al:${metadata.album}]`);
-    lines.push(`[by:${metadata.by || 'LyricFlow AI'}]`);
+    lines.push(`[by:LyricFlow AI]`);
 
-    for (let i = 0; i < segments.length; i++) {
-        const seg = segments[i];
-        lines.push(`${formatToLRCTime(seg.start)}${seg.text}`);
+    for (let i = 0; i < lyrics.length; i++) {
+        const current = lyrics[i];
+        const next = lyrics[i + 1];
 
-        // Logic for blank timestamp between segments (gap > 4s)
-        if (i < segments.length - 1) {
-            const nextSeg = segments[i + 1];
-            const gap = nextSeg.start - seg.end;
-            if (gap > 4.0) {
-                lines.push(`${formatToLRCTime(seg.end + 1.0)}`); // Clear text 1s after segment ends
+        // Add current lyric
+        lines.push(`${formatToLRCTime(current.time)}${current.text}`);
+
+        // Effective end time of current line
+        let currentEnd = current.endTime || current.time + 2;
+        currentEnd = Math.min(currentEnd, audioDuration);
+
+        if (next) {
+            // If gap between current vocal end and next vocal start > 4s, clear screen
+            // Ensure we don't insert a clear tag past the audio duration
+            if (next.time - currentEnd > 4 && currentEnd < audioDuration) {
+                lines.push(`${formatToLRCTime(currentEnd)}`);
             }
         } else {
-            // LAST LINE SPECIAL LOGIC:
-            // Add a blank timestamp 4 seconds after the last line ends, 
-            // ONLY if it fits within the audio duration.
-            const targetBlankTime = seg.end + 4.0;
-            if (audioDuration > 0 && targetBlankTime <= audioDuration) {
-                lines.push(`${formatToLRCTime(targetBlankTime)}`);
+            // Last line special logic
+            // If audio still has > 4s after last vocal end, clear screen after 4s
+            // But strictly cap at duration
+            if (audioDuration && (audioDuration - currentEnd > 4)) {
+                const clearTime = Math.min(currentEnd + 4, audioDuration);
+                lines.push(`${formatToLRCTime(clearTime)}`);
             }
         }
     }
 
     return lines.join('\n');
-};
-
-export const formatDuration = (seconds: number): string => {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
 };
