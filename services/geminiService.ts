@@ -11,11 +11,16 @@ export const fileToBase64 = (file: Blob): Promise<string> => {
   });
 };
 
-const parseTimestamp = (ts: string | number): number => {
+/**
+ * Robust timestamp parser handling numbers (seconds) or strings (MM:SS.mmm)
+ */
+const parseTimestamp = (ts: any): number => {
   if (typeof ts === 'number') return ts;
-  if (!ts || typeof ts !== 'string') return 0;
+  if (typeof ts !== 'string') return 0;
   
-  const parts = ts.split(':');
+  const cleanTs = ts.replace(',', '.').trim(); // Handle comma as decimal separator
+  const parts = cleanTs.split(':');
+  
   // Handle HH:MM:SS.mmm
   if (parts.length === 3) {
     return (parseFloat(parts[0]) * 3600) + (parseFloat(parts[1]) * 60) + parseFloat(parts[2]);
@@ -25,7 +30,7 @@ const parseTimestamp = (ts: string | number): number => {
     return (parseFloat(parts[0]) * 60) + parseFloat(parts[1]);
   }
   // Fallback for raw seconds string
-  return parseFloat(ts) || 0;
+  return parseFloat(cleanTs) || 0;
 };
 
 export const transcribeAudio = async (
@@ -45,22 +50,26 @@ export const transcribeAudio = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Extremely strict prompt to prevent summarization and ensure synchronization
+  // Prompt engineered to handle the "Same-Start" and "Quote-Drift" issues
   const prompt = `
-    You are a professional audio transcriber specializing in lyric synchronization. 
-    Your goal is to generate a strictly synchronized, line-by-line transcript of the song.
+    TASK: ATOMIC VERBATIM AUDIO-TO-TEXT MAPPING.
+    
+    CRITICAL INSTRUCTIONS:
+    1. **PUNCTUATION & CONTRACTIONS**: The presence of single quotes ('), double quotes ("), or commas MUST NOT affect timing. If a line is "I'm here", the 'start' timestamp must be the exact millisecond the "I" sound begins.
+    2. **IDENTICAL LINE STARTING WORDS**: If multiple consecutive lines begin with the same words (e.g., "I...", "I...", "I..."), you MUST perform a high-resolution scan of the audio for EACH separate occurrence. Do not skip or merge these lines.
+    3. **JSON CHARACTER ESCAPING**: Ensure all text within the JSON "text" field is properly escaped. Internal single and double quotes must not terminate the JSON string.
+    4. **STRICT VERBATIM**: Transcribe every ad-lib, repetition, and background vocal as a unique object.
+    5. **TIMESTAMP PRECISION**:
+       - "start": Absolute float seconds (3 decimals) when sound begins.
+       - "end": Absolute float seconds (3 decimals) when sound ends.
+    6. **FULL COVERAGE**: Start transcribing from 0.000 until the audio file ends. Do not summarize the ending.
 
-    CRITICAL RULES - READ CAREFULLY:
-    1. **NO SUMMARIZATION**: You MUST transcribe EVERY single line. Do not skip repeated choruses, hooks, or background vocals.
-    2. **VERBATIM**: If a line is repeated 5 times, output 5 separate JSON entries with the exact time each one is sung.
-    3. **SEGMENTATION**: Break text into natural lyric lines (e.g., "Hello / how are you" -> 2 lines if sung with a pause).
-    4. **TIMESTAMPS**: 
-       - "start": The exact moment the first syllable is audible.
-       - "end": The exact moment the line ends or silence begins.
-       - Format MUST be "MM:SS.mmm" (e.g. "03:05.123").
-    5. **COMPLETENESS**: Verify that the transcript covers the entire duration of the audio provided.
-
-    Output strictly a JSON array of objects.
+    REASONING PROCESS:
+    - First, transcribe the full verbatim text.
+    - Second, use the reasoning budget to pinpoint the exact audio onset for every word.
+    - Third, check for drift: ensure that if line A and B are similar, their timestamps are unique and sequential.
+    
+    Output: JSON array of objects.
   `;
 
   try {
@@ -78,18 +87,31 @@ export const transcribeAudio = async (
         ]
       },
       config: {
-        // Disable thinking for transcription to prevent the model from "reasoning" about the song structure 
-        // and summarizing repeated parts. We want raw, mechanical transcription.
-        thinkingConfig: { thinkingBudget: 0 },
+        // System instruction forces the model to ignore its "summarization" and "linguistic prediction" biases.
+        systemInstruction: "You are a specialized low-level signal processing agent. You map audio waves to verbatim text strings with microsecond intent. You ignore song structure, rhymes, or document patterns. You treat every phoneme as an independent event on a timeline. You have no creativity; you are a clock.",
+        
+        // High thinking budget is required to allow the model to re-examine audio 
+        // when it encounters text patterns like repetitive starts or heavy punctuation.
+        thinkingConfig: { thinkingBudget: 8192 },
+        
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              start: { type: Type.STRING, description: "Start time in 'MM:SS.mmm' format" },
-              end: { type: Type.STRING, description: "End time in 'MM:SS.mmm' format" },
-              text: { type: Type.STRING, description: "The literal text sung at this timestamp" }
+              start: { 
+                type: Type.NUMBER, 
+                description: "Start time in seconds (float, e.g. 15.005)" 
+              },
+              end: { 
+                type: Type.NUMBER, 
+                description: "End time in seconds (float, e.g. 18.250)" 
+              },
+              text: { 
+                type: Type.STRING, 
+                description: "Verbatim text including punctuation and case" 
+              }
             },
             required: ["start", "end", "text"]
           },
@@ -109,25 +131,25 @@ export const transcribeAudio = async (
     if (signal?.aborted) throw new Error("Aborted");
 
     let jsonText = response.text || "[]";
-    // Clean up potential markdown formatting if the model ignores responseMimeType (rare but possible)
+    // Clean up any potential markdown formatting if the model ignored the mimeType
     jsonText = jsonText.replace(/```json|```/g, "").trim();
 
     if (!jsonText) return [];
 
     const rawSegments = JSON.parse(jsonText) as any[];
 
-    // Map to LyricLine format (time, endTime, text)
+    // Parse and map to internal format
     return rawSegments.map(seg => ({
       time: parseTimestamp(seg.start),
       endTime: parseTimestamp(seg.end),
-      text: seg.text || ""
-    }));
+      text: (seg.text || "").trim()
+    })).filter(line => line.text.length > 0);
 
   } catch (error: any) {
     if (signal?.aborted || error.message === "Aborted") {
         throw new Error("Aborted");
     }
-    console.error("Transcription error:", error);
+    console.error("Transcription service error:", error);
     throw error;
   }
 };
