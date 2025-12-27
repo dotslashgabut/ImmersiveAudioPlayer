@@ -45,7 +45,7 @@ export const transcribeAudio = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  // Stricter prompt to ensure precision, adapted from sample_geminiService.ts
+  // Stricter prompt to ensure precision and prevent deduplication of repeated lines
   const prompt = `
     Act as a professional audio transcriber and lyric synchronizer. 
     Analyze the provided audio and generate highly accurate subtitles/lyrics.
@@ -55,6 +55,11 @@ export const transcribeAudio = async (
     2. **SYNC**: The "start" timestamp must align exactly with the very first audible syllable or sound of the phrase.
     3. **DURATION**: The "end" timestamp must mark exactly when the phrase or vocal line concludes.
     4. **CONSISTENCY**: Timestamps must be absolute and strictly chronological.
+
+    TRANSCRIPTION RULES:
+    1. **VERBATIM**: Transcribe exactly what is heard.
+    2. **REPETITION**: Do NOT skip repeated lines, choruses, or background vocals. If a line is sung multiple times, include it each time with its specific timestamp. DO NOT deduplicate text.
+    3. **COMPLETENESS**: Ensure every vocal phrase is captured. Do not summarize.
 
     BEHAVIOR:
     - If it's a song, capture lyrics.
