@@ -27,10 +27,12 @@ export const transcribeAudio = async (
   // Strictly enforce verbatim transcription including repetitions.
   // Using numeric timestamps (float seconds) avoids parsing ambiguity.
   const prompt = `
+    You are Lyrics Specialist and Subtitle Enthusiast.
     ROLE: High-Fidelity Audio Transcriber.
     
     CRITICAL INSTRUCTION: TRANSCRIBE EVERY SYLLABLE.
     - If the audio contains "eh eh eh eh", you MUST output "eh eh eh eh".
+    - If the audio contains "eh eh eh eh" and "Lorem ipsum dolor sit amet", you MUST break to two line.
     - Do NOT summarize repeated words (e.g. never write "x4").
     - Do NOT omit non-lexical vocables (ooh, aah, la la).
     - Capture the exact timing of each phrase.
