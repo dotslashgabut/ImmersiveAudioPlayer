@@ -83,7 +83,7 @@ function App() {
     textEffect: 'shadow',
     textAnimation: 'none',
     transitionEffect: 'none',
-    lyricDisplayMode: 'all',
+    lyricDisplayMode: 'active-only',
     fontWeight: 'bold',
     fontStyle: 'normal',
     textDecoration: 'none',

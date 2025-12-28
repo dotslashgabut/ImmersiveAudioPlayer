@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: RenderConfig = {
     textEffect: 'shadow',
     textAnimation: 'none',
     transitionEffect: 'none',
-    lyricDisplayMode: 'all',
+    lyricDisplayMode: 'active-only',
     fontWeight: 'bold',
     fontStyle: 'normal',
     textDecoration: 'none',
@@ -734,10 +734,10 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                         onChange={(e) => handleChange('lyricDisplayMode', e.target.value)}
                         className="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-purple-500"
                     >
-                        <option value="all">Show All (Default)</option>
+                        <option value="active-only">Current Line Only (Default)</option>
+                        <option value="all">Show All</option>
                         <option value="previous-next">Prev & Next (Centered)</option>
                         <option value="next-only">Current & Next</option>
-                        <option value="active-only">Current Line Only</option>
                     </select>
                 </section>
 
