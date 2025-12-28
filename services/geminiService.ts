@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { LyricLine } from "../types";
+import { parseTimestamp } from "../utils/timeUtils";
 
 export const fileToBase64 = (file: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -25,7 +26,7 @@ export const transcribeAudio = async (
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
   // Strictly enforce verbatim transcription including repetitions.
-  // Using numeric timestamps (float seconds) avoids parsing ambiguity.
+  // Using string timestamps (MM:SS.mmm) avoids float precision ambiguity and is standard for lyrics.
   const prompt = `
     You are Lyrics Specialist and Subtitle Enthusiast.
     ROLE: High-Fidelity Audio Transcriber.
@@ -36,8 +37,11 @@ export const transcribeAudio = async (
     - Do NOT summarize repeated words (e.g. never write "x4").
     - Do NOT omit non-lexical vocables (ooh, aah, la la).
     - Capture the exact timing of each phrase.
+    - DO NOT SKIP vocals.
+    - DO NOT inform music / song / instrument on transcibed text.
     
-    OUTPUT FORMAT: JSON Array of objects with 'startTime' (float seconds), 'endTime' (float seconds), and 'text'.
+    OUTPUT FORMAT: JSON Array of objects with 'startTime' (string "MM:SS.mmm"), 'endTime' (string "MM:SS.mmm"), and 'text'.
+    Example timestamp: "00:41.520"
     NO MARKDOWN. NO COMMENTS.
   `;
 
@@ -56,9 +60,10 @@ export const transcribeAudio = async (
         ]
       },
       config: {
-        // Budget set to 2048 to allow reasoning for repetitive sections without excessive latency.
-        // Use 0 if speed is absolute priority, but 2048 helps with 'eh eh eh' constraints.
-        thinkingConfig: { thinkingBudget: 2048 }, 
+        // Disable thinking budget (set to 0) to improve generation speed and prevent timeouts/truncation on long audio.
+        // Transcription is primarily a perception task.
+        thinkingConfig: { thinkingBudget: 0 }, 
+        maxOutputTokens: 8192,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
@@ -66,12 +71,12 @@ export const transcribeAudio = async (
             type: Type.OBJECT,
             properties: {
               startTime: {
-                type: Type.NUMBER,
-                description: "Start time in seconds (e.g. 12.5)"
+                type: Type.STRING,
+                description: "Start time in MM:SS.mmm format (e.g. 00:41.520)"
               },
               endTime: {
-                type: Type.NUMBER,
-                description: "End time in seconds (e.g. 14.2)"
+                type: Type.STRING,
+                description: "End time in MM:SS.mmm format (e.g. 00:45.080)"
               },
               text: {
                 type: Type.STRING,
@@ -87,17 +92,42 @@ export const transcribeAudio = async (
     if (signal?.aborted) throw new Error("Aborted");
 
     let jsonText = response.text || "[]";
-    // Sanitize markdown if present (though responseMimeType should prevent it)
-    jsonText = jsonText.replace(/```json|```/gi, "").trim();
+    
+    // Robust JSON extraction: Find the outer brackets to ignore markdown or preamble
+    const firstBracket = jsonText.indexOf('[');
+    const lastBracket = jsonText.lastIndexOf(']');
+    
+    if (firstBracket !== -1 && lastBracket !== -1) {
+        jsonText = jsonText.substring(firstBracket, lastBracket + 1);
+    } else {
+        // Fallback cleanup
+        jsonText = jsonText.replace(/```json|```/gi, "").trim();
+    }
 
-    if (!jsonText) return [];
+    if (!jsonText || jsonText === "[]") return [];
 
-    const rawSegments = JSON.parse(jsonText) as any[];
+    let rawSegments: any[] = [];
+    try {
+        rawSegments = JSON.parse(jsonText);
+    } catch (parseError) {
+        console.error("JSON Parse failed, attempting to recover:", parseError);
+        // Last ditch attempt: if it's truncated, add closing bracket
+        if (jsonText.trim().endsWith(',')) {
+             try {
+                rawSegments = JSON.parse(jsonText.trim().slice(0, -1) + ']');
+             } catch (e) {
+                console.error("Recovery failed", e);
+                throw parseError;
+             }
+        } else {
+             throw parseError;
+        }
+    }
 
     return rawSegments
       .map(seg => ({
-        time: Number(seg.startTime ?? seg.start ?? 0),
-        endTime: Number(seg.endTime ?? seg.end ?? 0),
+        time: parseTimestamp(seg.startTime),
+        endTime: parseTimestamp(seg.endTime),
         text: (seg.text || "").trim()
       }))
       .filter(line => line.text.length > 0)
