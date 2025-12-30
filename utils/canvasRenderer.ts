@@ -378,14 +378,11 @@ export const drawCanvasFrame = (
         }
 
         // --- DYNAMIC LAYOUT CALCULATION ---
-        // We now use dynamic layout for ALL modes to prevent overlap when lines wrap.
         const lineYPositions = new Map<number, number>();
         const lineHeights = new Map<number, number>();
         
-        // Use a gap slightly smaller than lineSpacing to keep block groups tight but distinct
         const gap = (isPortrait ? 30 : 40) * scale * fontSizeScale;
 
-        // 1. Measure all heights first
         for (let i = startI; i <= endI; i++) {
             let textToMeasure = "";
             let isCurrent = false;
@@ -406,7 +403,6 @@ export const drawCanvasFrame = (
                 continue;
             }
 
-            // Mimic font logic used in drawing loop for accurate measurement
             const fs = isCurrent ? baseFontSize : secondaryFontSize;
             let weight = isCurrent ? (['large', 'large_upper', 'big_center', 'metal', 'tech'].includes(activePreset) ? '900' : 'bold') : '400';
             if (activePreset === 'custom' && renderConfig?.fontWeight) {
@@ -415,7 +411,6 @@ export const drawCanvasFrame = (
             const style = (activePreset === 'custom' && renderConfig?.fontStyle) ? renderConfig.fontStyle : 'normal';
             ctx.font = `${style} ${weight} ${fs}px ${fontFamily}`;
 
-            // Apply casing using utility
             let casing = renderConfig?.textCase || 'none';
             if (casing === 'none' && isCurrent && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset)) {
                 casing = 'upper';
@@ -428,10 +423,8 @@ export const drawCanvasFrame = (
             lineHeights.set(i, wrappedLines.length * lh);
         }
 
-        // 2. Position Active Line (0) at Center
         lineYPositions.set(0, centerY);
 
-        // 3. Stack Downwards (1 to endI)
         let currentY = centerY + ((lineHeights.get(0) || 0) / 2);
         for (let i = 1; i <= endI; i++) {
             const h = lineHeights.get(i) || 0;
@@ -441,7 +434,6 @@ export const drawCanvasFrame = (
             currentY += gap + h;
         }
 
-        // 4. Stack Upwards (-1 to startI)
         currentY = centerY - ((lineHeights.get(0) || 0) / 2);
         for (let i = -1; i >= startI; i--) {
             const h = lineHeights.get(i) || 0;
@@ -450,7 +442,6 @@ export const drawCanvasFrame = (
             lineYPositions.set(i, y);
             currentY -= gap + h;
         }
-        // --- END DYNAMIC LAYOUT ---
 
         for (let i = startI; i <= endI; i++) {
             let line: LyricLine | null = null;
@@ -525,14 +516,10 @@ export const drawCanvasFrame = (
                     else if (textAnim === 'pulse') { const s = 1 + Math.sin(time * 4) * 0.08; animScaleX = s; animScaleY = s; }
                 }
 
-                // Determine Y Position
                 let yPos = 0;
-                
-                // Use dynamic layout positions for ALL modes if available
                 if (lineYPositions.has(i)) {
                     yPos = lineYPositions.get(i)!;
                 } else {
-                    // Fallback should rarely be hit now
                     yPos = (centerY + (i * lineSpacing) + (i === 0 ? offsetY : 0));
                 }
                 
@@ -575,7 +562,6 @@ export const drawCanvasFrame = (
                         drawWrappedText(ctx, artistStr, xPos, artistY, width * 0.9, artistLH, textEffect, decoration);
                     }
                 } else {
-                    // Unified drawing with wrapping for all presets/lines to prevent overflow
                     const fontSize = isCurrent ? baseFontSize : secondaryFontSize;
                     const lineHeight = fontSize * 1.2;
                     const maxWidth = activePreset === 'subtitle' ? width * 0.8 : width * 0.9;
@@ -589,6 +575,178 @@ export const drawCanvasFrame = (
 
     // Info Layer
     if (!['subtitle', 'just_video', 'none'].includes(activePreset)) {
-        // ... rest of code (no changes needed) ...
+        const showTitle = renderConfig?.showTitle ?? true;
+        const showArtist = renderConfig?.showArtist ?? true;
+        const showCover = renderConfig?.showCover ?? true;
+
+        if (showTitle || showArtist || showCover) {
+            const infoStyle = renderConfig?.infoStyle || 'classic';
+            const position = renderConfig?.infoPosition || 'top-left';
+            const marginScale = renderConfig?.infoMarginScale ?? 1.0;
+            const sizeScale = renderConfig?.infoSizeScale ?? 1.0;
+
+            // Dynamic scaling based on canvas size
+            const minDim = Math.min(width, height);
+            const s = minDim / 1080;
+
+            const margin = 60 * s * marginScale;
+            let coverDim = 180 * s * sizeScale;
+            const titleSize = 42 * s * sizeScale;
+            const artistSize = 28 * s * sizeScale;
+            const gap = 24 * s * sizeScale;
+            const padding = 30 * s; 
+
+            if (infoStyle === 'minimal' || infoStyle === 'modern') {
+                coverDim = 0; 
+            }
+
+            // Measure Text
+            ctx.font = `bold ${titleSize}px ${fontFamily}`;
+            const titleMetrics = ctx.measureText(metadata.title);
+            
+            ctx.font = `${renderConfig?.fontWeight === 'bold' ? 'bold' : 'normal'} ${artistSize}px ${fontFamily}`;
+            const artistMetrics = ctx.measureText(metadata.artist);
+
+            const maxTextWidth = Math.max(titleMetrics.width, artistMetrics.width);
+            
+            let contentWidth = maxTextWidth;
+            if (showCover && metadata.coverUrl && coverDim > 0) {
+                contentWidth += coverDim + gap;
+            }
+
+            const contentHeight = Math.max(coverDim, titleSize + artistSize + gap/2);
+
+            let startX = margin;
+            let startY = margin;
+
+            // Adjust start coordinates for Box style first to ensure content aligns with margins
+            if (infoStyle === 'box') {
+                // If Left aligned (default startX=margin), we need to push it right by padding so the box edge hits margin
+                if (!position.includes('right') && !position.includes('center')) {
+                    startX += padding;
+                }
+                // If Top aligned (default startY=margin), we need to push it down by padding
+                if (!position.includes('bottom')) {
+                    startY += padding;
+                }
+            }
+
+            // Horizontal Position
+            if (position.includes('right')) {
+                startX = width - margin - contentWidth;
+                if (infoStyle === 'box') startX -= padding; // Shift left by padding so box right edge hits margin
+            } else if (position.includes('center')) {
+                startX = (width - contentWidth) / 2;
+            }
+
+            // Vertical Position
+            if (position.includes('bottom')) {
+                startY = height - margin - contentHeight;
+                if (infoStyle === 'box') startY -= padding; // Shift up by padding so box bottom edge hits margin
+            } else if (position.includes('center')) {
+                 // Vertical center is usually reserved for lyrics, but if forced:
+                 // startY = (height - contentHeight) / 2;
+            }
+
+            // Box Background
+            if (infoStyle === 'box') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+                ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                ctx.shadowBlur = 20 * s;
+                // Draw rounded rect around content
+                const boxX = startX - padding;
+                const boxY = startY - padding;
+                const boxW = contentWidth + (padding * 2);
+                const boxH = contentHeight + (padding * 2);
+                
+                ctx.beginPath();
+                ctx.roundRect(boxX, boxY, boxW, boxH, 15 * s);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // Calculate coordinates based on alignment
+            let coverX = startX;
+            let textX = startX;
+            let textAlign: CanvasTextAlign = 'left';
+
+            if (position.includes('right')) {
+                // Right Alignment: [Text] [Art]
+                if (showCover && metadata.coverUrl && coverDim > 0) {
+                    coverX = startX + contentWidth - coverDim; // Art at right end
+                    textX = startX + contentWidth - coverDim - gap; // Text to left of art
+                } else {
+                    textX = startX + contentWidth; // Text at right end
+                }
+                textAlign = 'right';
+            } else if (position.includes('center')) {
+                // Center Alignment: [Art] [Text] (Standard order, centered text)
+                if (showCover && metadata.coverUrl && coverDim > 0) {
+                    coverX = startX; // Art at left of content block
+                    textX = startX + coverDim + gap + (maxTextWidth / 2); // Text center of text area
+                } else {
+                    textX = startX + (maxTextWidth / 2); // Text center of content area
+                }
+                textAlign = 'center';
+            } else {
+                // Left Alignment: [Art] [Text]
+                if (showCover && metadata.coverUrl && coverDim > 0) {
+                    coverX = startX; // Art at left
+                    textX = startX + coverDim + gap; // Text to right of art
+                } else {
+                    textX = startX; // Text at left
+                }
+                textAlign = 'left';
+            }
+            
+            // Draw Cover
+            if (showCover && metadata.coverUrl && coverDim > 0) {
+                const img = images.get('cover');
+                if (img) {
+                    ctx.save();
+                    const coverY = startY + (contentHeight - coverDim) / 2;
+                    
+                    if (infoStyle === 'circle_art') {
+                        ctx.beginPath();
+                        ctx.arc(coverX + coverDim/2, coverY + coverDim/2, coverDim/2, 0, Math.PI * 2);
+                        ctx.clip();
+                    } else {
+                        // Rounded rect for art
+                        ctx.beginPath();
+                        ctx.roundRect(coverX, coverY, coverDim, coverDim, 12 * s);
+                        ctx.clip();
+                    }
+
+                    ctx.drawImage(img, coverX, coverY, coverDim, coverDim);
+                    ctx.restore();
+                }
+            }
+
+            // Draw Text
+            // Vertically center text block within contentHeight
+            const textBlockHeight = (showTitle ? titleSize : 0) + (showArtist ? artistSize + (showTitle ? 10 * s : 0) : 0);
+            let textY = startY + (contentHeight - textBlockHeight) / 2;
+
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4 * s;
+            ctx.shadowOffsetX = 2 * s;
+            ctx.shadowOffsetY = 2 * s;
+            ctx.textAlign = textAlign;
+            ctx.textBaseline = 'top';
+
+            if (showTitle) {
+                ctx.font = `bold ${titleSize}px ${fontFamily}`;
+                ctx.fillStyle = renderConfig?.fontColor || '#ffffff';
+                ctx.fillText(metadata.title, textX, textY);
+                textY += titleSize + (10 * s);
+            }
+
+            if (showArtist) {
+                ctx.font = `${renderConfig?.fontWeight === 'bold' ? 'bold' : 'normal'} ${artistSize}px ${fontFamily}`;
+                ctx.fillStyle = renderConfig?.fontColor ? `${renderConfig.fontColor}dd` : '#cccccc'; // Slight transparency
+                ctx.fillText(metadata.artist, textX, textY);
+            }
+        }
     }
 };

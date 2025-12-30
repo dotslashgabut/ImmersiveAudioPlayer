@@ -1,3 +1,4 @@
+
 import React, { useRef, useEffect, useState } from 'react';
 import { X, Video, Settings, ImageIcon, Type, Layout, Palette, Music, FileText, Check, ListMusic, Bold, Italic, Underline, Strikethrough, AlignVerticalJustifyCenter, AlignVerticalJustifyStart, AlignVerticalJustifyEnd, Upload, Trash2, ChevronDown, Maximize, RotateCcw, Download, Keyboard as KeyboardIcon } from './Icons';
 import { RenderConfig, VideoPreset } from '../types';
@@ -823,18 +824,21 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                                 <button
                                     onClick={() => handleChange('infoPosition', 'top-left')}
                                     className={`h-8 rounded-md border flex items-start justify-start p-1 transition-all ${config.infoPosition === 'top-left' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Top Left"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
                                 <button
                                     onClick={() => handleChange('infoPosition', 'top-center')}
                                     className={`h-8 rounded-md border flex items-start justify-center p-1 transition-all ${config.infoPosition === 'top-center' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Top Center"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
                                 <button
                                     onClick={() => handleChange('infoPosition', 'top-right')}
                                     className={`h-8 rounded-md border flex items-start justify-end p-1 transition-all ${config.infoPosition === 'top-right' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Top Right"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
@@ -842,18 +846,21 @@ const RenderSettings: React.FC<RenderSettingsProps> = ({
                                 <button
                                     onClick={() => handleChange('infoPosition', 'bottom-left')}
                                     className={`h-8 rounded-md border flex items-end justify-start p-1 transition-all ${config.infoPosition === 'bottom-left' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Bottom Left"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
                                 <button
                                     onClick={() => handleChange('infoPosition', 'bottom-center')}
                                     className={`h-8 rounded-md border flex items-end justify-center p-1 transition-all ${config.infoPosition === 'bottom-center' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Bottom Center"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
                                 <button
                                     onClick={() => handleChange('infoPosition', 'bottom-right')}
                                     className={`h-8 rounded-md border flex items-end justify-end p-1 transition-all ${config.infoPosition === 'bottom-right' ? 'bg-purple-600 border-purple-500 text-white' : 'bg-zinc-800 border-white/5 text-zinc-500 hover:border-white/20'}`}
+                                    title="Bottom Right"
                                 >
                                     <div className="w-2 h-2 bg-current rounded-sm" />
                                 </button>
