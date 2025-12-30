@@ -347,7 +347,7 @@ export const drawCanvasFrame = (
 
     baseFontSize *= fontSizeScale; secondaryFontSize *= fontSizeScale; lineSpacing *= fontSizeScale;
 
-    if ((renderConfig?.showLyrics ?? true) && (activeIdx !== -1 || showIntroTitle || (renderConfig?.lyricDisplayMode === 'all' && lyrics.length > 0))) {
+    if ((renderConfig?.showLyrics ?? true) && (activeIdx !== -1 || showIntroTitle || (renderConfig?.lyricDisplayMode === 'all' && lyrics.length > 0) || (renderConfig?.lyricDisplayMode !== 'active-only' && lyrics.length > 0))) {
         let centerY = height / 2;
         if (renderConfig?.contentPosition === 'top') {
             centerY = height * 0.25;
@@ -355,31 +355,12 @@ export const drawCanvasFrame = (
             centerY = height * 0.75;
         }
 
-        let activeLineShift = 0;
-        const isBigLayout = ['large', 'large_upper', 'big_center', 'metal', 'kids', 'sad', 'romantic', 'tech', 'gothic', 'testing', 'testing_up', 'one_line', 'one_line_up', 'custom'].includes(activePreset);
-
-        // Calculate shift for ALL active lines to prevent overlap if they wrap, regardless of preset
-        const activeLine = showIntroTitle ? { time: 0, text: introContent } : (lyrics[activeIdx] || lyrics[virtualActiveIdx]);
-        if (activeLine) {
-            ctx.font = `900 ${baseFontSize}px ${fontFamily}`;
-            let textToCheck = activeLine.text;
-            let casing = renderConfig?.textCase || 'none';
-            if (casing === 'none' && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset)) {
-                casing = 'upper';
-            }
-            if (casing === 'upper') textToCheck = textToCheck.toUpperCase();
-            else if (casing === 'lower') textToCheck = textToCheck.toLowerCase();
-            else if (casing === 'title') {
-                textToCheck = textToCheck.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-            }
-
-            // Wrap logic for shift calculation
-            const lines = getWrappedLines(ctx, textToCheck, width * 0.9);
-            if (lines.length > 1) {
-                // Calculate how much we need to shift neighbors
-                activeLineShift = ((lines.length - 1) * (baseFontSize * 1.2)) / 2;
-            }
+        // Special override for Subtitle preset position if not 'all' mode (which scrolls center)
+        if (activePreset === 'subtitle' && renderConfig?.lyricDisplayMode !== 'all') {
+            centerY = height - (120 * scale);
         }
+
+        const isBigLayout = ['large', 'large_upper', 'big_center', 'metal', 'kids', 'sad', 'romantic', 'tech', 'gothic', 'testing', 'testing_up', 'one_line', 'one_line_up', 'custom'].includes(activePreset);
 
         let startI = isBigLayout ? -1 : -2;
         let endI = isBigLayout ? 1 : 2;
@@ -394,6 +375,83 @@ export const drawCanvasFrame = (
             startI = -lyrics.length;
             endI = lyrics.length;
         }
+
+        // --- DYNAMIC LAYOUT CALCULATION ---
+        // We now use dynamic layout for ALL modes to prevent overlap when lines wrap.
+        const lineYPositions = new Map<number, number>();
+        const lineHeights = new Map<number, number>();
+        
+        // Use a gap slightly smaller than lineSpacing to keep block groups tight but distinct
+        const gap = (isPortrait ? 30 : 40) * scale * fontSizeScale;
+
+        // 1. Measure all heights first
+        for (let i = startI; i <= endI; i++) {
+            let textToMeasure = "";
+            let isCurrent = false;
+
+            if (i === 0 && showIntroTitle) {
+                textToMeasure = introContent;
+                isCurrent = true;
+            } else {
+                const idx = virtualActiveIdx + i;
+                if (idx >= 0 && idx < lyrics.length) {
+                    textToMeasure = lyrics[idx].text;
+                    isCurrent = (idx === activeIdx);
+                }
+            }
+
+            if (!textToMeasure) {
+                lineHeights.set(i, 0);
+                continue;
+            }
+
+            // Mimic font logic used in drawing loop for accurate measurement
+            const fs = isCurrent ? baseFontSize : secondaryFontSize;
+            let weight = isCurrent ? (['large', 'large_upper', 'big_center', 'metal', 'tech'].includes(activePreset) ? '900' : 'bold') : '400';
+            if (activePreset === 'custom' && renderConfig?.fontWeight) {
+                weight = renderConfig.fontWeight;
+            }
+            const style = (activePreset === 'custom' && renderConfig?.fontStyle) ? renderConfig.fontStyle : 'normal';
+            ctx.font = `${style} ${weight} ${fs}px ${fontFamily}`;
+
+            // Mimic casing logic
+            let casing = renderConfig?.textCase || 'none';
+            if (casing === 'none' && isCurrent && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset)) {
+                casing = 'upper';
+            }
+            if (casing === 'upper') textToMeasure = textToMeasure.toUpperCase();
+            else if (casing === 'lower') textToMeasure = textToMeasure.toLowerCase();
+            else if (casing === 'title') textToMeasure = textToMeasure.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+
+            const lh = fs * 1.2;
+            const maxWidth = activePreset === 'subtitle' ? width * 0.8 : width * 0.9;
+            const wrappedLines = getWrappedLines(ctx, textToMeasure, maxWidth);
+            lineHeights.set(i, wrappedLines.length * lh);
+        }
+
+        // 2. Position Active Line (0) at Center
+        lineYPositions.set(0, centerY);
+
+        // 3. Stack Downwards (1 to endI)
+        let currentY = centerY + ((lineHeights.get(0) || 0) / 2);
+        for (let i = 1; i <= endI; i++) {
+            const h = lineHeights.get(i) || 0;
+            if (h === 0) continue;
+            const y = currentY + gap + (h / 2);
+            lineYPositions.set(i, y);
+            currentY += gap + h;
+        }
+
+        // 4. Stack Upwards (-1 to startI)
+        currentY = centerY - ((lineHeights.get(0) || 0) / 2);
+        for (let i = -1; i >= startI; i--) {
+            const h = lineHeights.get(i) || 0;
+            if (h === 0) continue;
+            const y = currentY - gap - (h / 2);
+            lineYPositions.set(i, y);
+            currentY -= gap + h;
+        }
+        // --- END DYNAMIC LAYOUT ---
 
         for (let i = startI; i <= endI; i++) {
             let line: LyricLine | null = null;
@@ -472,13 +530,17 @@ export const drawCanvasFrame = (
                     else if (textAnim === 'pulse') { const s = 1 + Math.sin(time * 4) * 0.08; animScaleX = s; animScaleY = s; }
                 }
 
-                let yPos = (activePreset === 'subtitle' && i === 0 && renderConfig?.lyricDisplayMode !== 'all')
-                    ? (height - 120 * scale)
-                    : (centerY + (i * lineSpacing) + (i === 0 ? offsetY : 0));
-
-                if (activePreset !== 'custom') {
-                    if (i < 0) yPos -= activeLineShift; else if (i > 0) yPos += activeLineShift;
+                // Determine Y Position
+                let yPos = 0;
+                
+                // Use dynamic layout positions for ALL modes if available
+                if (lineYPositions.has(i)) {
+                    yPos = lineYPositions.get(i)!;
+                } else {
+                    // Fallback should rarely be hit now
+                    yPos = (centerY + (i * lineSpacing) + (i === 0 ? offsetY : 0));
                 }
+                
                 yPos += animOffsetY;
 
                 let xPos = width / 2;
@@ -521,7 +583,6 @@ export const drawCanvasFrame = (
                     // Unified drawing with wrapping for all presets/lines to prevent overflow
                     const fontSize = isCurrent ? baseFontSize : secondaryFontSize;
                     const lineHeight = fontSize * 1.2;
-                    // For subtitles, slightly tighter width might be preferred but width * 0.9 is safe
                     const maxWidth = activePreset === 'subtitle' ? width * 0.8 : width * 0.9;
                     
                     drawWrappedText(ctx, textToDraw, xPos, yPos, maxWidth, lineHeight, textEffect, decoration);
@@ -533,165 +594,3 @@ export const drawCanvasFrame = (
 
     // Info Layer
     if (!['subtitle', 'just_video', 'none'].includes(activePreset)) {
-        const showInfo = renderConfig ? (renderConfig.showTitle || renderConfig.showArtist) : true;
-        const showCover = renderConfig ? renderConfig.showCover : true;
-        if (showInfo || showCover) {
-            const infoScale = renderConfig?.infoSizeScale ?? 1.0;
-            if (activePreset === 'custom') {
-                const pos = renderConfig?.infoPosition || 'top-left';
-                const style = renderConfig?.infoStyle || 'classic';
-                const borderRadius = (style === 'box') ? 0 : 12 * scale;
-                const margin = 40 * scale * (renderConfig?.infoMarginScale ?? 1);
-
-                let x = 0, y = 0;
-                let align: CanvasTextAlign = 'left';
-                let vertical: 'top' | 'bottom' = 'top';
-
-                if (pos.includes('left')) { x = margin; align = 'left'; }
-                else if (pos.includes('right')) { x = width - margin; align = 'right'; }
-                else { x = width / 2; align = 'center'; }
-
-                if (pos.includes('top')) { y = margin; vertical = 'top'; }
-                else { y = height - margin; vertical = 'bottom'; }
-
-                const coverSize = (style === 'minimal' || style === 'modern') ? 0 : 100 * scale * infoScale;
-                const hasCover = showCover && coverSize > 0 && (metadata.coverUrl !== null);
-                const coverImg = hasCover ? (metadata.backgroundType === 'video' ? videos.get('background') : images.get('cover')) : null;
-
-                const titleSize = (style === 'minimal' ? 20 : (style === 'modern' || style === 'modern_art') ? 40 : 28) * scale * infoScale;
-                const artistSize = (style === 'minimal' ? 14 : (style === 'modern' || style === 'modern_art') ? 24 : 18) * scale * infoScale;
-                const titleFont = `bold ${titleSize}px ${fontFamily}`;
-                const artistFont = `${artistSize}px ${fontFamily}`;
-                const gap = 20 * scale * infoScale;
-
-                const mainColor = renderConfig?.fontColor || '#ffffff';
-                const artistColor = (style === 'modern' || style === 'modern_art') ? mainColor : (renderConfig?.fontColor || '#d4d4d8');
-
-                let curY = y;
-                let curX = x;
-
-                if (align === 'center') {
-                    ctx.textAlign = 'center';
-                    if (vertical === 'top') {
-                        ctx.textBaseline = 'top';
-                        if (hasCover && coverImg) {
-                            const imgX = x - coverSize / 2;
-                            ctx.save(); ctx.beginPath();
-                            if (style === 'circle_art') ctx.arc(x, curY + coverSize / 2, coverSize / 2, 0, Math.PI * 2);
-                            else ctx.roundRect(imgX, curY, coverSize, coverSize, borderRadius);
-                            ctx.clip(); ctx.drawImage(coverImg, imgX, curY, coverSize, coverSize); ctx.restore();
-                            curY += coverSize + gap;
-                        }
-                        if (renderConfig?.showTitle ?? true) {
-                            ctx.fillStyle = mainColor; ctx.font = titleFont;
-                            ctx.fillText(metadata.title, x, curY); curY += titleSize + 5 * scale * infoScale;
-                        }
-                        if (renderConfig?.showArtist ?? true) {
-                            ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, x, curY);
-                        }
-                    } else { 
-                        ctx.textBaseline = 'bottom';
-                        if (renderConfig?.showArtist ?? true) {
-                            ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, x, curY);
-                            curY -= (artistSize + 5 * scale * infoScale);
-                        }
-                        if (renderConfig?.showTitle ?? true) {
-                            ctx.fillStyle = mainColor; ctx.font = titleFont; ctx.fillText(metadata.title, x, curY);
-                            curY -= (titleSize + gap);
-                        }
-                        if (hasCover && coverImg) {
-                            const imgX = x - coverSize / 2; curY -= coverSize;
-                            ctx.save(); ctx.beginPath();
-                            if (style === 'circle_art') ctx.arc(x, curY + coverSize / 2, coverSize / 2, 0, Math.PI * 2);
-                            else ctx.roundRect(imgX, curY, coverSize, coverSize, borderRadius);
-                            ctx.clip(); ctx.drawImage(coverImg, imgX, curY, coverSize, coverSize); ctx.restore();
-                        }
-                    }
-                } else {
-                    ctx.textAlign = align; ctx.textBaseline = 'top';
-                    const isRight = align === 'right';
-                    const textTotalH = (renderConfig?.showTitle ? titleSize : 0) + (renderConfig?.showArtist ? artistSize + 5 * scale * infoScale : 0);
-                    const blockH = Math.max(coverSize, textTotalH);
-                    const startY = vertical === 'top' ? y : y - blockH;
-
-                    if (hasCover && coverImg) {
-                        const imgX = isRight ? x - coverSize : x;
-                        ctx.save(); ctx.beginPath();
-                        if (style === 'circle_art') ctx.arc(imgX + coverSize / 2, startY + coverSize / 2, coverSize / 2, 0, Math.PI * 2);
-                        else ctx.roundRect(imgX, startY, coverSize, coverSize, borderRadius);
-                        ctx.clip(); ctx.drawImage(coverImg, imgX, startY, coverSize, coverSize); ctx.restore();
-                        if (isRight) curX -= (coverSize + gap); else curX += (coverSize + gap);
-                    }
-
-                    let textY = startY + (blockH - textTotalH) / 2;
-                    if (renderConfig?.showTitle ?? true) {
-                        ctx.fillStyle = mainColor; ctx.font = titleFont; ctx.fillText(metadata.title, curX, textY);
-                        textY += titleSize + 5 * scale * infoScale;
-                    }
-                    if (renderConfig?.showArtist ?? true) {
-                        ctx.fillStyle = artistColor; ctx.font = artistFont; ctx.fillText(metadata.artist, curX, textY);
-                    }
-                }
-            } else if (['big_center', 'metal', 'kids', 'sad', 'romantic', 'tech', 'gothic', 'testing', 'testing_up', 'one_line', 'one_line_up', 'slideshow', 'subtitle'].includes(activePreset)) {
-                if (showInfo) {
-                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-                    let bottomMargin = 80 * scale;
-                    if (['testing', 'testing_up', 'one_line', 'one_line_up'].includes(activePreset)) bottomMargin = 120 * scale;
-                    if (renderConfig?.showTitle ?? true) {
-                        ctx.font = `bold ${20 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
-                        ctx.fillText(metadata.title, width / 2, height - bottomMargin - (30 * scale * infoScale));
-                    }
-                    if (renderConfig?.showArtist ?? true) {
-                        ctx.font = `${16 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
-                        ctx.fillText(metadata.artist, width / 2, height - bottomMargin);
-                    }
-                }
-            } else {
-                const margin = 40 * scale * (renderConfig?.infoMarginScale ?? 1), isSq = width === height, thumbSize = (isPortrait ? (isSq ? 110 : 150) : 100) * scale * infoScale;
-                const coverImg = metadata.coverUrl ? images.get('cover') : null;
-                const r = 12 * scale * infoScale;
-                if (isPortrait) {
-                    const startY = margin * (isSq ? 1.5 : 3), centerX = width / 2, imgX = centerX - thumbSize / 2, imgY = startY;
-                    if (showCover) {
-                        ctx.save(); ctx.beginPath(); ctx.roundRect(imgX, imgY, thumbSize, thumbSize, r); ctx.clip();
-                        if (coverImg) ctx.drawImage(coverImg, imgX, imgY, thumbSize, thumbSize);
-                        else { ctx.fillStyle = '#27272a'; ctx.fillRect(imgX, imgY, thumbSize, thumbSize); }
-                        ctx.restore();
-                    }
-                    if (showInfo) {
-                        ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-                        const titleY = imgY + (showCover ? thumbSize + 25 * scale * infoScale : 0);
-                        if (renderConfig?.showTitle ?? true) {
-                            ctx.font = `bold ${(isSq ? 26 : 36) * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
-                            ctx.fillText(metadata.title, centerX, titleY);
-                        }
-                        if (renderConfig?.showArtist ?? true) {
-                            ctx.font = `${(isSq ? 18 : 24) * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
-                            ctx.fillText(metadata.artist, centerX, titleY + ((renderConfig?.showTitle ?? true) ? (isSq ? 30 : 40) * scale * infoScale : 0));
-                        }
-                    }
-                } else {
-                    const x = margin, y = margin;
-                    if (showCover) {
-                        ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, thumbSize, thumbSize, r); ctx.clip();
-                        if (coverImg) ctx.drawImage(coverImg, x, y, thumbSize, thumbSize);
-                        else { ctx.fillStyle = '#27272a'; ctx.fillRect(x, y, thumbSize, thumbSize); }
-                        ctx.restore();
-                    }
-                    if (showInfo) {
-                        ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-                        const titleX = x + (showCover ? thumbSize + 25 * scale * infoScale : 0), titleSize = 28 * scale * infoScale, titleY = y + thumbSize / 2 - titleSize;
-                        if (renderConfig?.showTitle ?? true) {
-                            ctx.font = `bold ${titleSize}px ${fontFamily}`; ctx.fillStyle = '#ffffff';
-                            ctx.fillText(metadata.title, titleX, titleY);
-                        }
-                        if (renderConfig?.showArtist ?? true) {
-                            ctx.font = `${18 * scale * infoScale}px ${fontFamily}`; ctx.fillStyle = '#d4d4d8';
-                            ctx.fillText(metadata.artist, titleX, titleY + ((renderConfig?.showTitle ?? true) ? titleSize + 5 * scale * infoScale : 0));
-                        }
-                    }
-                }
-            }
-        }
-    }
-};
