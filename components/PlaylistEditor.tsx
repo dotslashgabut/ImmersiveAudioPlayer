@@ -248,11 +248,7 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (selectedIndex !== null && e.key === 'Delete') {
             e.preventDefault(); e.stopPropagation();
-            setPlaylist(prev => {
-                const newList = [...prev];
-                newList.splice(selectedIndex, 1);
-                return newList;
-            });
+            removeTrack(selectedIndex);
         } else if (e.key === 'ArrowDown' && playlist.length > 0) {
             e.preventDefault(); e.stopPropagation();
             setSelectedIndex(prev => prev === null ? 0 : Math.min(prev + 1, playlist.length - 1));
@@ -362,6 +358,12 @@ const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ playlist, setPlaylist, 
     };
 
     const removeTrack = (index: number) => {
+        if (index === currentTrackIndex) {
+            onClearPlaylist();
+        } else if (index < currentTrackIndex) {
+            setCurrentTrackIndex(prev => prev - 1);
+        }
+
         setPlaylist(prev => {
             const newList = [...prev];
             newList.splice(index, 1);
