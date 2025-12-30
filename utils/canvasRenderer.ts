@@ -1,3 +1,4 @@
+
 import { LyricLine, VideoPreset, VisualSlide, AudioMetadata, RenderConfig } from '../types';
 
 export const drawCanvasFrame = (
@@ -283,7 +284,6 @@ export const drawCanvasFrame = (
     if (renderConfig && renderConfig.backgroundBlurStrength > 0) ctx.filter = `blur(${renderConfig.backgroundBlurStrength}px)`;
     else if (isBlurEnabled) ctx.filter = 'blur(12px)'; 
 
-    // FIX: Decouple background sources to prevent flashes of album art at the end of visuals
     const bgMode = renderConfig?.backgroundSource || 'custom';
     if (bgMode === 'timeline') {
         const currentSlide = visualSlides.find(s => s.type !== 'audio' && time >= s.startTime && time < s.endTime);
@@ -358,13 +358,26 @@ export const drawCanvasFrame = (
         let activeLineShift = 0;
         const isBigLayout = ['large', 'large_upper', 'big_center', 'metal', 'kids', 'sad', 'romantic', 'tech', 'gothic', 'testing', 'testing_up', 'one_line', 'one_line_up', 'custom'].includes(activePreset);
 
-        if (isBigLayout || activePreset === 'slideshow' || activePreset === 'subtitle') {
-            const activeLine = showIntroTitle ? { time: 0, text: introContent } : (lyrics[activeIdx] || lyrics[virtualActiveIdx]);
-            if (activeLine) {
-                ctx.font = `900 ${baseFontSize}px ${fontFamily}`;
-                const textToCheck = ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset) ? activeLine.text.toUpperCase() : activeLine.text;
-                const lines = getWrappedLines(ctx, textToCheck, width * 0.9);
-                if (lines.length > 1) activeLineShift = ((lines.length - 1) * (baseFontSize * 1.2)) / 2;
+        // Calculate shift for ALL active lines to prevent overlap if they wrap, regardless of preset
+        const activeLine = showIntroTitle ? { time: 0, text: introContent } : (lyrics[activeIdx] || lyrics[virtualActiveIdx]);
+        if (activeLine) {
+            ctx.font = `900 ${baseFontSize}px ${fontFamily}`;
+            let textToCheck = activeLine.text;
+            let casing = renderConfig?.textCase || 'none';
+            if (casing === 'none' && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset)) {
+                casing = 'upper';
+            }
+            if (casing === 'upper') textToCheck = textToCheck.toUpperCase();
+            else if (casing === 'lower') textToCheck = textToCheck.toLowerCase();
+            else if (casing === 'title') {
+                textToCheck = textToCheck.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+            }
+
+            // Wrap logic for shift calculation
+            const lines = getWrappedLines(ctx, textToCheck, width * 0.9);
+            if (lines.length > 1) {
+                // Calculate how much we need to shift neighbors
+                activeLineShift = ((lines.length - 1) * (baseFontSize * 1.2)) / 2;
             }
         }
 
@@ -504,10 +517,14 @@ export const drawCanvasFrame = (
                         ctx.font = `${style} ${artistWeight} ${secondaryFontSize}px ${fontFamily}`;
                         drawWrappedText(ctx, artistStr, xPos, artistY, width * 0.9, artistLH, textEffect, decoration);
                     }
-                } else if (isCurrent && (isBigLayout || ['slideshow', 'subtitle'].includes(activePreset))) {
-                    drawWrappedText(ctx, textToDraw, xPos, yPos, width * 0.9, baseFontSize * 1.2, textEffect, decoration);
                 } else {
-                    drawLineWithEffects(ctx, textToDraw, xPos, yPos, textEffect, decoration);
+                    // Unified drawing with wrapping for all presets/lines to prevent overflow
+                    const fontSize = isCurrent ? baseFontSize : secondaryFontSize;
+                    const lineHeight = fontSize * 1.2;
+                    // For subtitles, slightly tighter width might be preferred but width * 0.9 is safe
+                    const maxWidth = activePreset === 'subtitle' ? width * 0.8 : width * 0.9;
+                    
+                    drawWrappedText(ctx, textToDraw, xPos, yPos, maxWidth, lineHeight, textEffect, decoration);
                 }
                 ctx.restore();
             }
