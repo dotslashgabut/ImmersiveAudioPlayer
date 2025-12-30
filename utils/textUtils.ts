@@ -11,7 +11,7 @@ export const applyTextCase = (text: string, casing: 'none' | 'upper' | 'lower' |
         case 'sentence':
             return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
         case 'invert':
-            return text.split('').map(c => c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()).join('');
+            return text.replace(/\w\S*/g, (txt) => txt.charAt(0).toLowerCase() + txt.substr(1).toUpperCase());
         case 'none':
         default:
             return text;
