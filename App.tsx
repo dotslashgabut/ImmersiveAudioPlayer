@@ -13,6 +13,7 @@ import PlaylistEditor from './components/PlaylistEditor';
 import RenderSettings from './components/RenderSettings';
 import { drawCanvasFrame } from './utils/canvasRenderer';
 import { loadGoogleFonts } from './utils/fonts';
+import { applyTextCase } from './utils/textUtils';
 
 
 function App() {
@@ -329,7 +330,7 @@ function App() {
         const text = await track.lyricFile.text();
         const ext = track.lyricFile.name.split('.').pop()?.toLowerCase();
         if (ext === 'lrc') setLyrics(parseLRC(text));
-        else if (ext === 'srt') setLyrics(parseSRT(text));
+        else if (ext === 'srt') setLyrics(parseSRT(text);
       } catch (e) {
         console.error("Failed to load lyrics", e);
       }
@@ -1443,6 +1444,14 @@ function App() {
                 };
 
                 let textContent = line.text;
+                
+                // Logic to match canvasRenderer behavior for text casing
+                let casing = renderConfig.textCase;
+                if (casing === 'none' && isActive && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(preset)) {
+                    casing = 'upper';
+                }
+                textContent = applyTextCase(textContent, casing);
+
                 if (isActive && renderConfig.textAnimation === 'typewriter') {
                   textContent = textContent.substring(0, Math.max(0, Math.floor((currentTime - line.time) * 35)));
                 }
@@ -1731,7 +1740,7 @@ function App() {
                     >
                       <option value="auto" className="bg-zinc-900">Auto Select (Best)</option>
                       {supportedCodecs.map(c => (
-                        <option key={c.value} value={c.value} className="bg-zinc-900">{c.label}</option>
+                        <option key={c.value} value={c.value}>{c.label}</option>
                       ))}
                     </select>
                     <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-1 text-zinc-500">

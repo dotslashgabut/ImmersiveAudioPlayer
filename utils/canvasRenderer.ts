@@ -1,5 +1,6 @@
 
 import { LyricLine, VideoPreset, VisualSlide, AudioMetadata, RenderConfig } from '../types';
+import { applyTextCase } from './textUtils';
 
 export const drawCanvasFrame = (
     ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
@@ -414,14 +415,12 @@ export const drawCanvasFrame = (
             const style = (activePreset === 'custom' && renderConfig?.fontStyle) ? renderConfig.fontStyle : 'normal';
             ctx.font = `${style} ${weight} ${fs}px ${fontFamily}`;
 
-            // Mimic casing logic
+            // Apply casing using utility
             let casing = renderConfig?.textCase || 'none';
             if (casing === 'none' && isCurrent && ['large_upper', 'big_center', 'metal', 'tech', 'testing_up', 'one_line_up'].includes(activePreset)) {
                 casing = 'upper';
             }
-            if (casing === 'upper') textToMeasure = textToMeasure.toUpperCase();
-            else if (casing === 'lower') textToMeasure = textToMeasure.toLowerCase();
-            else if (casing === 'title') textToMeasure = textToMeasure.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+            textToMeasure = applyTextCase(textToMeasure, casing);
 
             const lh = fs * 1.2;
             const maxWidth = activePreset === 'subtitle' ? width * 0.8 : width * 0.9;
@@ -517,11 +516,7 @@ export const drawCanvasFrame = (
                     casing = 'upper';
                 }
 
-                if (casing === 'upper') textToDraw = textToDraw.toUpperCase();
-                else if (casing === 'lower') textToDraw = textToDraw.toLowerCase();
-                else if (casing === 'title') {
-                    textToDraw = textToDraw.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
-                }
+                textToDraw = applyTextCase(textToDraw, casing);
 
                 let animOffsetX = 0, animOffsetY = 0, animScaleX = 1, animScaleY = 1, animRotation = 0;
 
@@ -594,3 +589,6 @@ export const drawCanvasFrame = (
 
     // Info Layer
     if (!['subtitle', 'just_video', 'none'].includes(activePreset)) {
+        // ... rest of code (no changes needed) ...
+    }
+};
